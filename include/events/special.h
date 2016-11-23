@@ -363,6 +363,8 @@ static inline caerSpecialEvent caerSpecialEventPacketFindValidEventByType(caerSp
 	return (NULL);
 }
 
+#undef TYPE_MASK
+
 #ifdef __cplusplus
 }
 #endif
