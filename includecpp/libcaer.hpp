@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <type_traits>
 
+/*
 namespace libcaer {
 namespace log {
 
@@ -67,5 +68,5 @@ void logVAFull(int logFileDescriptor1, int logFileDescriptor2, uint8_t systemLog
 
 }
 }
-
+*/
 #endif /* LIBCAER_HPP_ */
