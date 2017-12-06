@@ -10,3 +10,4 @@ DAVIS example:
 C: gcc -std=c11 -pedantic -Wall -Wextra -O2 -o davis_simple davis_simple.c -D_DEFAULT_SOURCE=1 -lcaer
 C++: g++ -std=c++11 -pedantic -Wall -Wextra -O2 -o davis_simple davis_simple.cpp -D_DEFAULT_SOURCE=1 -lcaer
 Microphones (C++): g++ -std=c++11 -pedantic -Wall -Wextra -O2 -o davis_microphones davis_microphones.cpp -D_DEFAULT_SOURCE=1 -lcaer -lsfml-system -lsfml-audio
+CvGUI: g++ -std=c++11 -pedantic -Wall -Wextra -O2 $(pkg-config --cflags-only-I opencv) -o davis_cvgui davis_cvgui.cpp -D_DEFAULT_SOURCE=1 -lcaer $(pkg-config --libs opencv)
