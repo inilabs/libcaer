@@ -1,6 +1,8 @@
-#include <libcaercpp/devices/davis.hpp>
-#include <csignal>
 #include <atomic>
+#include <csignal>
+
+#include <libcaercpp/devices/davis.hpp>
+#include <opencv2/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
 using namespace std;
@@ -144,6 +146,12 @@ int main(void) {
 				bool pol = firstEvent.getPolarity();
 
 				printf("First polarity event - ts: %d, x: %d, y: %d, pol: %d.\n", ts, x, y, pol);
+
+				cv::Mat cvEvents(davis_info.dvsSizeY, davis_info.dvsSizeX, CV_8UC3, cv::Vec3b{127, 127, 127});
+				for(const auto &e: *polarity)
+					cvEvents.at<cv::Vec3b>(e.getY(), e.getX()) = e.getPolarity() ? cv::Vec3b{255, 255, 255} : cv::Vec3b{0, 0, 0};
+				cv::imshow("PLOT_EVENTS", cvEvents);
+				cv::moveWindow("PLOT_EVENTS", 240, 0);
 			}
 
 			if (packet->getEventType() == FRAME_EVENT) {
