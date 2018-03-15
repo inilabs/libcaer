@@ -67,8 +67,6 @@ typedef struct dynapse_handle *dynapseHandle;
 caerDeviceHandle dynapseOpen(uint16_t deviceID, uint8_t busNumberRestrict, uint8_t devAddressRestrict,
 	const char *serialNumberRestrict);
 bool dynapseClose(caerDeviceHandle handle);
-caerDeviceHandle dynapseInfoCreate(caerDeviceInfoHandle handle, uint8_t busNumberRestrict, uint8_t devAddressRestrict,
-				   const char *serialNumberRestrict);
 
 bool dynapseSendDefaultConfig(caerDeviceHandle handle);
 // Negative addresses are used for host-side configuration.
