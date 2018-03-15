@@ -736,6 +736,16 @@ struct caer_dynapse_info {
 };
 
 /**
+* Info handle used for device discovery
+*/
+struct dynapse_info_handle {
+	uint16_t deviceType;
+	struct caer_dynapse_info info;
+};
+
+typedef struct dynapse_info_handle *dynapseInfoHandle;
+
+/**
  * Return basic information on the device, such as its ID, the logic
  * version, and so on. See the 'struct caer_dynapse_info' documentation
  * for more details.

@@ -1937,6 +1937,16 @@ struct caer_davis_info {
 };
 
 /**
+* Info handle used for device discovery
+*/
+struct davis_info_handle {
+	uint16_t deviceType;
+	struct caer_davis_info info;
+};
+
+typedef struct davis_info_handle *davisInfoHandle;
+
+/**
  * Return basic information on the device, such as its ID, its
  * resolution, the logic version, and so on. See the 'struct
  * caer_davis_info' documentation for more details.
@@ -2093,6 +2103,7 @@ struct caer_bias_shiftedsource caerBiasShiftedSourceParse(const uint16_t shifted
  */
 bool caerDavisROIConfigure(caerDeviceHandle handle, uint8_t roiRegion, bool enable, uint16_t startX, uint16_t startY,
 	uint16_t endX, uint16_t endY);
+
 
 #ifdef __cplusplus
 }

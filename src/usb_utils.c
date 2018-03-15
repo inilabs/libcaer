@@ -248,6 +248,77 @@ void usbDeviceClose(usbState state) {
 	libusb_exit(state->deviceContext);
 }
 
+ssize_t usbDiscoverDevices(struct usb_info ***infoBuffer) {
+	int res = libusb_init(NULL);
+	size_t numDevicesFound = 0;
+
+	if (res != LIBUSB_SUCCESS) {
+		return -1;
+	}
+
+	libusb_device_handle *devHandle = NULL;
+	libusb_device **devicesList;
+
+	ssize_t result = libusb_get_device_list(NULL, &devicesList);
+
+	// Find the number of devices with the correct vendor ID
+	if (result >= 0) {
+		for (size_t i = 0; i < (size_t) result; i++) {
+			struct libusb_device_descriptor devDesc;
+			if (libusb_get_device_descriptor(devicesList[i], &devDesc) != LIBUSB_SUCCESS) {
+				continue;
+			}
+
+			if (devDesc.idVendor == USB_DEFAULT_DEVICE_VID) {
+				numDevicesFound++;
+			}
+		}
+	}
+
+	*infoBuffer = calloc(numDevicesFound, sizeof(**infoBuffer));
+
+	size_t deviceNum = 0;
+
+	if (result >= 0) {
+		// Cycle thorough all discovered devices and find a match.
+		for (size_t i = 0; i < (size_t) result; i++) {
+			struct libusb_device_descriptor devDesc;
+
+			if (libusb_get_device_descriptor(devicesList[i], &devDesc) != LIBUSB_SUCCESS) {
+				continue;
+			}
+
+			// Check if this is the device we want (VID/PID).
+			if (devDesc.idVendor == USB_DEFAULT_DEVICE_VID) {
+				if (libusb_open(devicesList[i], &devHandle) != LIBUSB_SUCCESS) {
+					devHandle = NULL;
+
+					continue;
+				}
+
+				// Grab the device information
+				struct usb_info *usbInfo = malloc(sizeof(*usbInfo));
+				usbInfo->busNumber = libusb_get_bus_number(devicesList[i]);
+				usbInfo->devAddress = libusb_get_device_address(devicesList[i]);
+				usbInfo->productID = devDesc.idProduct;
+				libusb_get_string_descriptor_ascii(devHandle, devDesc.iSerialNumber,
+								   (unsigned char*)usbInfo->serialNumber, MAX_SERIAL_NUMBER_LENGTH + 1);
+				if (deviceNum < numDevicesFound) {
+					(*infoBuffer)[deviceNum] = usbInfo;
+					deviceNum++;
+				}
+
+				libusb_close(devHandle);
+
+			}
+		}
+
+		libusb_free_device_list(devicesList, true);
+	}
+
+	return (ssize_t)numDevicesFound;
+}
+
 void usbSetThreadName(usbState state, const char *threadName) {
 	strncpy(state->usbThreadName, threadName, MAX_THREAD_NAME_LENGTH);
 	state->usbThreadName[MAX_THREAD_NAME_LENGTH] = '\0';

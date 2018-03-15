@@ -54,6 +54,7 @@ typedef struct usb_state *usbState;
 struct usb_info {
 	uint8_t busNumber;
 	uint8_t devAddress;
+	uint16_t productID;
 	char serialNumber[MAX_SERIAL_NUMBER_LENGTH + 1];
 	char *deviceString;
 };
@@ -61,6 +62,8 @@ struct usb_info {
 bool usbDeviceOpen(usbState state, uint16_t devVID, uint16_t devPID, uint8_t busNumber, uint8_t devAddress,
 	const char *serialNumber, int32_t requiredLogicRevision, int32_t requiredFirmwareVersion);
 void usbDeviceClose(usbState state);
+
+ssize_t usbDiscoverDevices(struct usb_info ***infoBuffer);
 
 void usbSetThreadName(usbState state, const char *threadName);
 void usbSetDataCallback(usbState state,

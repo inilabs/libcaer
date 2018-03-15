@@ -10,7 +10,7 @@
 
 #define DYNAPSE_DEVICE_PID 0x841D
 
-#define DYNAPSE_REQUIRED_LOGIC_REVISION 5 
+#define DYNAPSE_REQUIRED_LOGIC_REVISION 5
 #define DYNAPSE_REQUIRED_FIRMWARE_VERSION 3
 
 #define VENDOR_REQUEST_FPGA_CONFIG_AER          0xC5
@@ -67,6 +67,8 @@ typedef struct dynapse_handle *dynapseHandle;
 caerDeviceHandle dynapseOpen(uint16_t deviceID, uint8_t busNumberRestrict, uint8_t devAddressRestrict,
 	const char *serialNumberRestrict);
 bool dynapseClose(caerDeviceHandle handle);
+caerDeviceHandle dynapseInfoCreate(caerDeviceInfoHandle handle, uint8_t busNumberRestrict, uint8_t devAddressRestrict,
+				   const char *serialNumberRestrict);
 
 bool dynapseSendDefaultConfig(caerDeviceHandle handle);
 // Negative addresses are used for host-side configuration.
