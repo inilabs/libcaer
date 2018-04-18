@@ -420,6 +420,7 @@ retry:
 ssize_t caerDeviceDiscover(caerDeviceInfoHandle **infoBuffer) {
 	struct usb_info **usbInfo = NULL;
 	ssize_t res = usbDiscoverDevices(&usbInfo);
+	ssize_t numDevices = 0;
 
 	if (res <= 0) {
 		return res;
@@ -430,29 +431,38 @@ ssize_t caerDeviceDiscover(caerDeviceInfoHandle **infoBuffer) {
 	for (size_t i = 0; i < (size_t)res; i++) {
 		if (usbInfo[i]->productID == DYNAPSE_DEVICE_PID) {
 			caerDeviceHandle cdh = dynapseOpen(0, usbInfo[i]->busNumber, usbInfo[i]->devAddress, NULL);
+			if (cdh == NULL)
+				continue;
 			dynapseInfoHandle dih = calloc(1, sizeof(*dih));
 			dih->deviceType = CAER_DEVICE_DYNAPSE;
 			dih->info = caerDynapseInfoGet(cdh);
 			dynapseClose(cdh);
 			(*infoBuffer)[i] = (caerDeviceInfoHandle)dih;
+			numDevices++;
 		}
 		else if (usbInfo[i]->productID == DAVIS_FX2_DEVICE_PID || usbInfo[i]->productID == DAVIS_FX3_DEVICE_PID) {
 			caerDeviceHandle cdh = davisOpen(0, usbInfo[i]->busNumber, usbInfo[i]->devAddress, NULL);
+			if (cdh == NULL)
+				continue;
 			davisInfoHandle dih = calloc(1, sizeof(*dih));
 			dih->deviceType = CAER_DEVICE_DAVIS;
 			dih->info = caerDavisInfoGet(cdh);
 			davisClose(cdh);
 			(*infoBuffer)[i] = (caerDeviceInfoHandle)dih;
+			numDevices++;
 		}
 		else if (usbInfo[i]->productID == DVS_DEVICE_PID) {
 			caerDeviceHandle cdh = dvs128Open(0, usbInfo[i]->busNumber, usbInfo[i]->devAddress, NULL);
+			if (cdh == NULL)
+				continue;
 			dvs128InfoHandle dih = calloc(1, sizeof(*dih));
 			dih->deviceType = CAER_DEVICE_DVS128;
 			dih->info = caerDVS128InfoGet(cdh);
 			dvs128Close(cdh);
 			(*infoBuffer)[i] = (caerDeviceInfoHandle)dih;
+			numDevices++;
 		}
 	}
 
-	return res;
+	return numDevices;
 }

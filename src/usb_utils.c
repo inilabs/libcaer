@@ -316,6 +316,8 @@ ssize_t usbDiscoverDevices(struct usb_info ***infoBuffer) {
 		libusb_free_device_list(devicesList, true);
 	}
 
+	libusb_exit(NULL);
+
 	return (ssize_t)numDevicesFound;
 }
 
