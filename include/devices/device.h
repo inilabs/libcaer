@@ -21,6 +21,15 @@ extern "C" {
  */
 typedef struct caer_device_handle *caerDeviceHandle;
 
+struct caer_device_info_handle {
+	uint16_t deviceType;
+};
+
+/**
+ * Pointer to device info on non-open device.
+ */
+typedef struct caer_device_info_handle *caerDeviceInfoHandle;
+
 /**
  * Module address: host-side data exchange (ring-buffer) configuration.
  */
@@ -109,6 +118,16 @@ typedef struct caer_device_handle *caerDeviceHandle;
  * @return true if closing was successful, false on errors.
  */
 bool caerDeviceClose(caerDeviceHandle *handle);
+
+/**
+* Find supported devices currently connected, but not opened.
+*
+* @param pointer to array of caerDeviceInfoHandles. The array will be filled with info
+* handle elements.
+*
+* @return the number of elements placed in the infoBuffer array, or -1 on error.
+*/
+ssize_t caerDeviceDiscover(caerDeviceInfoHandle **infoBuffer);
 
 /**
  * Send a set of good default configuration settings to the device.

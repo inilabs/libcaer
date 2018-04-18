@@ -151,6 +151,16 @@ struct caer_dvs128_info {
 };
 
 /**
+* Info handle used for device discovery
+*/
+struct dvs128_info_handle {
+	uint16_t deviceType;
+	struct caer_dvs128_info info;
+};
+
+typedef struct dvs128_info_handle *dvs128InfoHandle;
+
+/**
  * Return basic information on the device, such as its ID, its
  * resolution, the logic version, and so on. See the 'struct
  * caer_dvs128_info' documentation for more details.
