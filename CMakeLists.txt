@@ -101,6 +101,32 @@ CONFIGURE_FILE(libcaer.pc.in libcaer.pc @ONLY)
 
 INSTALL(FILES ${CMAKE_BINARY_DIR}/libcaer.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 
+# Export the cmake configuration for the install tree
+# This will not work for old cmake versions
+IF (NOT (CMAKE_VERSION VERSION_LESS "3.0"))
+	INCLUDE(CMakePackageConfigHelpers)
+	WRITE_BASIC_CONFIG_VERSION_FILE(
+		${PROJECT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake
+		VERSION ${PROJECT_VERSION}
+		COMPATIBILITY SameMajorVersion)
+	SET(include_dirs ${CMAKE_INSTALL_INCLUDEDIR})
+	SET(export_destination ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME})
+	CONFIGURE_PACKAGE_CONFIG_FILE(
+		${PROJECT_SOURCE_DIR}/libcaerConfig.cmake.in
+		${PROJECT_BINARY_DIR}/${PROJECT_NAME}Config.cmake
+		INSTALL_DESTINATION ${export_destination}
+		PATH_VARS include_dirs export_destination)
+	INSTALL(EXPORT libcaer-exports
+		NAMESPACE libcaer::
+		DESTINATION ${export_destination})
+	INSTALL(FILES
+		${PROJECT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake
+		${PROJECT_BINARY_DIR}/${PROJECT_NAME}Config.cmake
+		DESTINATION ${export_destination})
+	UNSET(include_dirs)
+	UNSET(export_destination)
+ENDIF()
+
 # Automatic documentation generation support
 FIND_PACKAGE(Doxygen)
 

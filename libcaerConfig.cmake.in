@@ -1,0 +1,36 @@
+# libcaer
+# -------
+#
+# cmake configuration for libcaer
+#
+# IMPORTED Targets
+# ^^^^^^^^^^^^^^^^
+#
+# ``libcaer::caer``
+#   the library (so-version)
+# ``libcaer::caerStatic``
+#   static version of the library, if enabled
+#
+# Result VARIABLES
+# ^^^^^^^^^^^^^^^^
+#
+# ``libcaer_FOUND``
+#   ``TRUE`` if the library and all required components were found. If ``FALSE``
+#   do not try to use the library
+# ``libcaer_INCLUDE_DIRS``
+#   path with the headers
+# ``libcaer_VERSION``
+#   version as "MM.mm.pp[-rev]"
+# ``libcaer_VERSION_(MAJOR|MINOR|PATCH)``
+#   the version parts
+#
+
+@PACKAGE_INIT@
+
+CMAKE_POLICY(PUSH)
+CMAKE_POLICY(VERSION 3.0)
+
+include(@PACKAGE_export_destination@/libcaer-exports.cmake)
+set(libcaer_INCLUDE_DIRS @PACKAGE_include_dirs@)
+
+CMAKE_POLICY(POP)
