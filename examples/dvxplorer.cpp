@@ -117,7 +117,7 @@ int main(void) {
 
 				printf("First polarity event - ts: %d, x: %d, y: %d, pol: %d.\n", ts, x, y, pol);
 
-				cv::Mat cvEvents(480, 640, CV_8UC3, cv::Vec3b{127, 127, 127});
+				cv::Mat cvEvents(info.dvsSizeY, info.dvsSizeX, CV_8UC3, cv::Vec3b{127, 127, 127});
 				for (const auto &e : *polarity) {
 					cvEvents.at<cv::Vec3b>(e.getY(), e.getX())
 						= e.getPolarity() ? cv::Vec3b{255, 255, 255} : cv::Vec3b{0, 0, 0};
