@@ -34,6 +34,11 @@ static void populateDeviceInfo(
 	evkInfoPtr->deviceUSBDeviceAddress = usbInfo->devAddress;
 	evkInfoPtr->firmwareVersion        = usbInfo->firmwareVersion;
 
+	// TODO: make dynamic?
+	evkInfoPtr->chipID   = SAMSUNG_EVK_CHIP_RC0S;
+	evkInfoPtr->dvsSizeX = 1280;
+	evkInfoPtr->dvsSizeY = 960;
+
 	if (devHandle != NULL) {
 		// Populate info variables based on data from device.
 		// Get USB firmware version.
@@ -43,31 +48,32 @@ static void populateDeviceInfo(
 
 		evkInfoPtr->firmwareVersion = firmwareVersion;
 
-		// Chip information.
-		libusb_control_transfer(devHandle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-			VENDOR_REQUEST_I2C_READ, DEVICE_FPGA, 0x0004, (uint8_t[1]){0x01}, 1, 0);
+		//		// Chip information.
+		//		libusb_control_transfer(devHandle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR |
+		// LIBUSB_RECIPIENT_DEVICE, 			VENDOR_REQUEST_I2C_READ, DEVICE_FPGA, 0x0004, (uint8_t[1]){0x01}, 1, 0);
 
-		// Wait 10ms for DVS to start.
-		struct timespec dvsSleep = {.tv_sec = 0, .tv_nsec = 10000000};
-		thrd_sleep(&dvsSleep, NULL);
+		//		// Wait 10ms for DVS to start.
+		//		struct timespec dvsSleep = {.tv_sec = 0, .tv_nsec = 10000000};
+		//		thrd_sleep(&dvsSleep, NULL);
 
-		uint8_t otp = 0;
-		libusb_control_transfer(devHandle, LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-			VENDOR_REQUEST_I2C_READ, DEVICE_DVS, REGISTER_231Y_BIAS_OTP_TRIM, &otp, 1, 0);
+		//		uint8_t otp = 0;
+		//		libusb_control_transfer(devHandle, LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR |
+		// LIBUSB_RECIPIENT_DEVICE, 			VENDOR_REQUEST_I2C_READ, DEVICE_DVS, REGISTER_231Y_BIAS_OTP_TRIM, &otp,
+		// 1, 0);
 
-		libusb_control_transfer(devHandle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-			VENDOR_REQUEST_I2C_READ, DEVICE_FPGA, 0x0004, (uint8_t[1]){0x00}, 1, 0);
+		//		libusb_control_transfer(devHandle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR |
+		// LIBUSB_RECIPIENT_DEVICE, 			VENDOR_REQUEST_I2C_READ, DEVICE_FPGA, 0x0004, (uint8_t[1]){0x00}, 1, 0);
 
-		if (otp != 0) {
-			evkInfoPtr->chipID   = SAMSUNG_EVK_CHIP_231Y;
-			evkInfoPtr->dvsSizeX = 640;
-			evkInfoPtr->dvsSizeY = 480;
-		}
-		else {
-			evkInfoPtr->chipID   = SAMSUNG_EVK_CHIP_RC0S;
-			evkInfoPtr->dvsSizeX = 1280;
-			evkInfoPtr->dvsSizeY = 960;
-		}
+		//		if (otp != 0) {
+		//			evkInfoPtr->chipID   = SAMSUNG_EVK_CHIP_231Y;
+		//			evkInfoPtr->dvsSizeX = 640;
+		//			evkInfoPtr->dvsSizeY = 480;
+		//		}
+		//		else {
+		//			evkInfoPtr->chipID   = SAMSUNG_EVK_CHIP_RC0S;
+		//			evkInfoPtr->dvsSizeX = 1280;
+		//			evkInfoPtr->dvsSizeY = 960;
+		//		}
 	}
 
 	// Always unset here.
