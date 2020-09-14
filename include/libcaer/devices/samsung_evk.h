@@ -23,9 +23,15 @@ extern "C" {
 
 /**
  * Samsung chip identifier.
- * 640x480, semi-synchronous readout.
+ * 640x480, synchronous readout.
  */
-#define SAMSUNG_EVK_CHIP_ID 20
+#define SAMSUNG_EVK_CHIP_231Y 20
+
+/**
+ * Samsung chip identifier.
+ * 1280x960, synchronous readout.
+ */
+#define SAMSUNG_EVK_CHIP_RC0S 21
 
 #define SAMSUNG_EVK_DVS                             20
 #define SAMSUNG_EVK_DVS_MODE                        0

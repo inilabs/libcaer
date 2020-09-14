@@ -1,5 +1,8 @@
 #include "samsung_evk.h"
 
+static void Samsung231YInit(samsungEVKHandle handle);
+static void SamsungRC0SInit(samsungEVKHandle handle);
+
 static void samsungEVKLog(enum caer_log_level logLevel, samsungEVKHandle handle, const char *format, ...)
 	ATTRIBUTE_FORMAT(3);
 static void samsungEVKEventTranslator(void *vhd, const uint8_t *buffer, size_t bytesSent);
@@ -31,11 +34,6 @@ static void populateDeviceInfo(
 	evkInfoPtr->deviceUSBDeviceAddress = usbInfo->devAddress;
 	evkInfoPtr->firmwareVersion        = usbInfo->firmwareVersion;
 
-	// Fixed information.
-	evkInfoPtr->chipID   = SAMSUNG_EVK_CHIP_ID;
-	evkInfoPtr->dvsSizeX = 640;
-	evkInfoPtr->dvsSizeY = 480;
-
 	if (devHandle != NULL) {
 		// Populate info variables based on data from device.
 		// Get USB firmware version.
@@ -44,6 +42,32 @@ static void populateDeviceInfo(
 			VENDOR_REQUEST_I2C_READ, DEVICE_FPGA, 0xFF00, &firmwareVersion, 1, 0);
 
 		evkInfoPtr->firmwareVersion = firmwareVersion;
+
+		// Chip information.
+		libusb_control_transfer(devHandle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+			VENDOR_REQUEST_I2C_READ, DEVICE_FPGA, 0x0004, (uint8_t[1]){0x01}, 1, 0);
+
+		// Wait 10ms for DVS to start.
+		struct timespec dvsSleep = {.tv_sec = 0, .tv_nsec = 10000000};
+		thrd_sleep(&dvsSleep, NULL);
+
+		uint8_t otp = 0;
+		libusb_control_transfer(devHandle, LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+			VENDOR_REQUEST_I2C_READ, DEVICE_DVS, REGISTER_231Y_BIAS_OTP_TRIM, &otp, 1, 0);
+
+		libusb_control_transfer(devHandle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+			VENDOR_REQUEST_I2C_READ, DEVICE_FPGA, 0x0004, (uint8_t[1]){0x00}, 1, 0);
+
+		if (otp != 0) {
+			evkInfoPtr->chipID   = SAMSUNG_EVK_CHIP_231Y;
+			evkInfoPtr->dvsSizeX = 640;
+			evkInfoPtr->dvsSizeY = 480;
+		}
+		else {
+			evkInfoPtr->chipID   = SAMSUNG_EVK_CHIP_RC0S;
+			evkInfoPtr->dvsSizeX = 1280;
+			evkInfoPtr->dvsSizeY = 960;
+		}
 	}
 
 	// Always unset here.
@@ -203,38 +227,55 @@ caerDeviceHandle samsungEVKOpen(
 	struct timespec dvsSleep = {.tv_sec = 0, .tv_nsec = 10000000};
 	thrd_sleep(&dvsSleep, NULL);
 
+	// Initialize.
+	if (handle->info.chipID == SAMSUNG_EVK_CHIP_231Y) {
+		Samsung231YInit(handle);
+	}
+	else {
+		SamsungRC0SInit(handle);
+	}
+
+	samsungEVKLog(CAER_LOG_DEBUG, handle, "Initialized device successfully with USB Bus=%" PRIu8 ":Addr=%" PRIu8 ".",
+		handle->info.deviceUSBBusNumber, handle->info.deviceUSBDeviceAddress);
+
+	return ((caerDeviceHandle) handle);
+}
+
+static void Samsung231YInit(samsungEVKHandle handle) {
+	samsungEVKState state = &handle->state;
+
 	// Bias reset.
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_OTP_TRIM, 0x24);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_OTP_TRIM, 0x24);
 
 	// Bias enable.
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_PINS_DBGP, 0x07);
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_PINS_DBGN, 0xFF);
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_PINS_BUFP, 0x03);
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_PINS_BUFN, 0x7F);
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_PINS_DOB, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_PINS_DBGP, 0x07);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_PINS_DBGN, 0xFF);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_PINS_BUFP, 0x03);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_PINS_BUFN, 0x7F);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_PINS_DOB, 0x00);
 
 	samsungEVKConfigSet((caerDeviceHandle) handle, SAMSUNG_EVK_DVS_BIAS, SAMSUNG_EVK_DVS_BIAS_SIMPLE,
 		SAMSUNG_EVK_DVS_BIAS_SIMPLE_DEFAULT);
 
 	// System settings.
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_CLOCK_DIVIDER_SYS, 0xA0); // Divide freq by 10.
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_PARALLEL_OUT_CONTROL, 0x00);
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_PARALLEL_OUT_ENABLE, 0x01);
-	i2cConfigSend(
-		&state->usbState, DEVICE_DVS, REGISTER_CONTROL_PACKET_FORMAT, 0x00); // TODO: 0x80 to enable MGROUP compression.
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_CLOCK_DIVIDER_SYS, 0xA0); // Divide freq by 10.
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PARALLEL_OUT_CONTROL, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PARALLEL_OUT_ENABLE, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PACKET_FORMAT,
+		0x00); // TODO: 0x80 to enable MGROUP compression.
 
 	// Digital settings.
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_TIMESTAMP_SUBUNIT, 0x31);
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_MODE_CONTROL, 0x0C); // R/AY signals enable.
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_BOOT_SEQUENCE, 0x08);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_TIMESTAMP_SUBUNIT, 0x31);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_MODE_CONTROL, 0x0C); // R/AY signals enable.
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_BOOT_SEQUENCE, 0x08);
 
 	// Fine clock counts based on clock frequency.
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GH_COUNT_FINE, 50);
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_COUNT_FINE, 50);
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_END_FINE, 50);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GH_COUNT_FINE, 50);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_COUNT_FINE, 50);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_END_FINE, 50);
 
 	// Disable histogram, not currently used/mapped.
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_SPATIAL_HISTOGRAM_OFF, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_SPATIAL_HISTOGRAM_OFF, 0x01);
 
 	// Commands in firmware but not documented, unused.
 	// i2cConfigSend(&state->usbState, DEVICE_DVS, 0x3043, 0x01); // Bypass ESP.
@@ -242,11 +283,119 @@ caerDeviceHandle samsungEVKOpen(
 	// i2cConfigSend(&state->usbState, DEVICE_DVS, 0x324A, 0x01);
 	// i2cConfigSend(&state->usbState, DEVICE_DVS, 0x325A, 0x00);
 	// i2cConfigSend(&state->usbState, DEVICE_DVS, 0x325B, 0x01);
+}
 
-	samsungEVKLog(CAER_LOG_DEBUG, handle, "Initialized device successfully with USB Bus=%" PRIu8 ":Addr=%" PRIu8 ".",
-		handle->info.deviceUSBBusNumber, handle->info.deviceUSBDeviceAddress);
+static void SamsungRC0SInit(samsungEVKHandle handle) {
+	samsungEVKState state = &handle->state;
 
-	return ((caerDeviceHandle) handle);
+	// Bias reset.
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_BIAS_OTP_TRIM, 0x1F);
+
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_056, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CONTROL_OUTPUT_MUX, 0x02);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CONTROL_PLL_P, 0x06);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CONTROL_PLL_M, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CONTROL_PLL_M + 1, 0x77);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CONTROL_PLL_S, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_008, 0xa1);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CONTROL_CLOCK_DIVIDER_VS_VP, 0x40);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CONTROL_CLOCK_DIVIDER_VS_VP, 0x18);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_009, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CONTROL_SBLOCK_CLK_EN1, 0xf4);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CONTROL_SBLOCK_CLK_EN2, 0x20);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_010, 0x1b);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_011, 0x22);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_002, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_012, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_014, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_015, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_001, 0x10);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_007, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CONTROL_OUTPUT_MUX, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_003, 0xc9);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_004, 0xc9);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_005, 0xc9);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_013, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_027, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_028, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_029, 0x7a);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_030, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_031, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_032, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_033, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_034, 0x02);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_038, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_039, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_040, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_041, 0x0a);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_035, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_036, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_037, 0x50);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_042, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_043, 0x52);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_044, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_045, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_025, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_026, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_DIGITAL_MODE_CONTROL, 0x1F);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_TIMING_GH_SET, 0x0c);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_TIMING_GL_SET, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_TIMING_GR, 0x0c);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_TIMING_GL_HOLD, 0x39);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_TIMING_SELX, 0x17);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_TIMING_SENSE, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_TIMING_AY, 0x03);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_TIMING_AY_RST_GAP, 0x0d);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_TIMING_APS_RST, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_TIMING_SELX_GAP, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_TIMING_COL_MARGIN, 0x07);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_TIMING_FRM_MARGIN, 0x45);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_046, 0x03);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_059, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_058, 0x03);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_060, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_062, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_063, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_ACTIVITY_DECISION_BYPASS, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_ACTIVITY_DECISION_DEC_RATE, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_050, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_SPATIAL_HISTOGRAM_OFF, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_051, 0x63);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_052, 0x03);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_053, 0xe7);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_054, 0x08);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_055, 0x02);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CROPPER_BYPASS, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CROPPER_Y_START_GROUP, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CROPPER_Y_START_MASK, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CROPPER_Y_END_GROUP, 0x77);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CROPPER_Y_END_MASK, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CROPPER_X_START_ADDRESS, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CROPPER_X_START_ADDRESS + 1, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CROPPER_X_END_ADDRESS, 0x04);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CROPPER_X_END_ADDRESS + 1, 0xff);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_047, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_048, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_049, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_017, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_016, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_018, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_019, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_020, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_021, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_022, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_023, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_024, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_006, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_024, 0x00);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CONTROL_OUTPUT_MUX, 0x02);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_007, 0x01);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_003, 0xCB);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_004, 0xCB);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_005, 0xCB);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_CONTROL_MODE, 0x02);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_061, 0x04);
+	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_RC0S_UNK_057, 0x01);
 }
 
 bool samsungEVKClose(caerDeviceHandle cdh) {
@@ -294,6 +443,11 @@ struct caer_samsung_evk_info caerSamsungEVKInfoGet(caerDeviceHandle cdh) {
 
 bool samsungEVKSendDefaultConfig(caerDeviceHandle cdh) {
 	samsungEVKHandle handle = (samsungEVKHandle) cdh;
+
+	if (handle->info.chipID == SAMSUNG_EVK_CHIP_RC0S) {
+		// TODO: all in init() for now.
+		return (true);
+	}
 
 	// Set default biases.
 	samsungEVKConfigSet(cdh, SAMSUNG_EVK_DVS_BIAS, SAMSUNG_EVK_DVS_BIAS_SIMPLE, SAMSUNG_EVK_DVS_BIAS_SIMPLE_DEFAULT);
@@ -374,7 +528,7 @@ bool samsungEVKSendDefaultConfig(caerDeviceHandle cdh) {
 	samsungEVKConfigSet(cdh, SAMSUNG_EVK_DVS_ACTIVITY_DECISION, SAMSUNG_EVK_DVS_ACTIVITY_DECISION_POS_MAX_COUNT, 300);
 
 	// DTAG restart after config.
-	i2cConfigSend(&handle->state.usbState, DEVICE_DVS, REGISTER_DIGITAL_RESTART, 0x02);
+	i2cConfigSend(&handle->state.usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_RESTART, 0x02);
 
 	return (true);
 }
@@ -418,18 +572,19 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_MODE, U8T(param)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_MODE, U8T(param)));
 					break;
 				}
 
 				case SAMSUNG_EVK_DVS_EVENT_FLATTEN: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_PACKET_FORMAT, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PACKET_FORMAT, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_PACKET_FORMAT,
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PACKET_FORMAT,
 						(param) ? U8T(currVal | 0x40) : U8T(currVal & ~0x40)));
 					break;
 				}
@@ -437,11 +592,12 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_EVENT_ON_ONLY: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_PACKET_FORMAT, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PACKET_FORMAT, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_PACKET_FORMAT,
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PACKET_FORMAT,
 						(param) ? U8T(currVal | 0x20) : U8T(currVal & ~0x20)));
 					break;
 				}
@@ -449,11 +605,12 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_EVENT_OFF_ONLY: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_PACKET_FORMAT, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PACKET_FORMAT, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_PACKET_FORMAT,
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PACKET_FORMAT,
 						(param) ? U8T(currVal | 0x10) : U8T(currVal & ~0x10)));
 					break;
 				}
@@ -461,11 +618,11 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_SUBSAMPLE_ENABLE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_ENABLE, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_ENABLE, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_ENABLE,
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_ENABLE,
 						(param) ? U8T(currVal & ~0x04) : U8T(currVal | 0x04)));
 					break;
 				}
@@ -473,18 +630,18 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_AREA_BLOCKING_ENABLE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_ENABLE, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_ENABLE, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_ENABLE,
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_ENABLE,
 						(param) ? U8T(currVal & ~0x02) : U8T(currVal | 0x02)));
 					break;
 				}
 
 				case SAMSUNG_EVK_DVS_DUAL_BINNING_ENABLE: {
 					return (i2cConfigSend(
-						&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_DUAL_BINNING, (param) ? (0x01) : (0x00)));
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_DUAL_BINNING, (param) ? (0x01) : (0x00)));
 					break;
 				}
 
@@ -495,13 +652,15 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_SUBSAMPLE_RATIO, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_SUBSAMPLE_RATIO, &currVal)) {
 						return (false);
 					}
 
 					currVal = U8T(U8T(currVal) & ~0x38) | U8T(param << 3);
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_SUBSAMPLE_RATIO, currVal));
+					return (
+						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_SUBSAMPLE_RATIO, currVal));
 					break;
 				}
 
@@ -512,13 +671,15 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_SUBSAMPLE_RATIO, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_SUBSAMPLE_RATIO, &currVal)) {
 						return (false);
 					}
 
 					currVal = U8T(U8T(currVal) & ~0x07) | U8T(param);
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_SUBSAMPLE_RATIO, currVal));
+					return (
+						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_SUBSAMPLE_RATIO, currVal));
 					break;
 				}
 
@@ -543,7 +704,7 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_AREA_BLOCKING_18:
 				case SAMSUNG_EVK_DVS_AREA_BLOCKING_19: {
 					uint16_t regAddr
-						= REGISTER_DIGITAL_AREA_BLOCK + (2 * (paramAddr - SAMSUNG_EVK_DVS_AREA_BLOCKING_0));
+						= REGISTER_231Y_DIGITAL_AREA_BLOCK + (2 * (paramAddr - SAMSUNG_EVK_DVS_AREA_BLOCKING_0));
 
 					if (!i2cConfigSend(&state->usbState, DEVICE_DVS, regAddr, U8T(param >> 8))) {
 						return (false);
@@ -555,8 +716,9 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 
 				case SAMSUNG_EVK_DVS_TIMESTAMP_RESET: {
 					if (param) {
-						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_TIMESTAMP_RESET, 0x01);
-						return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_TIMESTAMP_RESET, 0x00));
+						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_TIMESTAMP_RESET, 0x01);
+						return (
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_TIMESTAMP_RESET, 0x00));
 					}
 					break;
 				}
@@ -564,17 +726,17 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_GLOBAL_RESET_ENABLE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_MODE_CONTROL, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_MODE_CONTROL, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_MODE_CONTROL,
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_MODE_CONTROL,
 						(param) ? U8T(currVal | 0x02) : U8T(currVal & ~0x02)));
 					break;
 				}
 
 				case SAMSUNG_EVK_DVS_GLOBAL_RESET_DURING_READOUT: {
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_GLOBAL_RESET_READOUT,
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_GLOBAL_RESET_READOUT,
 						(param) ? (0x01) : (0x00)));
 					break;
 				}
@@ -582,18 +744,18 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_GLOBAL_HOLD_ENABLE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_MODE_CONTROL, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_MODE_CONTROL, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_MODE_CONTROL,
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_MODE_CONTROL,
 						(param) ? U8T(currVal | 0x01) : U8T(currVal & ~0x01)));
 					break;
 				}
 
 				case SAMSUNG_EVK_DVS_FIXED_READ_TIME_ENABLE: {
-					return (i2cConfigSend(
-						&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_FIXED_READ_TIME, (param) ? (0x01) : (0x00)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_FIXED_READ_TIME,
+						(param) ? (0x01) : (0x00)));
 					break;
 				}
 
@@ -602,7 +764,8 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_EXTERNAL_TRIGGER, U8T(param)));
+					return (i2cConfigSend(
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_EXTERNAL_TRIGGER, U8T(param)));
 					break;
 				}
 
@@ -612,9 +775,9 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GH_COUNT, 0x00);
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GH_COUNT + 1, 0x00);
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GH_COUNT + 2, 0x02));
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GH_COUNT, 0x00);
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GH_COUNT + 1, 0x00);
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GH_COUNT + 2, 0x02));
 					break;
 				}
 
@@ -624,9 +787,9 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_COUNT, 0x00);
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_COUNT + 1, 0x00);
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_COUNT + 2, 0x00));
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_COUNT, 0x00);
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_COUNT + 1, 0x00);
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_COUNT + 2, 0x00));
 					break;
 				}
 
@@ -636,9 +799,9 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_END, 0x00);
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_END + 1, 0x00);
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_END + 2, 0x01));
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_END, 0x00);
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_END + 1, 0x00);
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_END + 2, 0x01));
 					break;
 				}
 
@@ -647,7 +810,8 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_FIRST_SELX_START, U8T(param)));
+					return (
+						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_FIRST_SELX_START, U8T(param)));
 					break;
 				}
 
@@ -656,7 +820,7 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_SELX_WIDTH, U8T(param)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_SELX_WIDTH, U8T(param)));
 					break;
 				}
 
@@ -665,7 +829,7 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_AY_START, U8T(param)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_AY_START, U8T(param)));
 					break;
 				}
 
@@ -674,7 +838,7 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_AY_END, U8T(param)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_AY_END, U8T(param)));
 					break;
 				}
 
@@ -683,7 +847,7 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_R_START, U8T(param)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_R_START, U8T(param)));
 					break;
 				}
 
@@ -692,7 +856,7 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_R_END, U8T(param)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_R_END, U8T(param)));
 					break;
 				}
 
@@ -701,13 +865,14 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_NEXT_SELX_START, U8T(param >> 8));
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_NEXT_SELX_START + 1, U8T(param));
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_NEXT_SELX_START, U8T(param >> 8));
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_NEXT_SELX_START + 1, U8T(param));
 
 					// Also set MAX_EVENT_NUM, which is defined as NEXT_SEL-5, up to a maximum of 60.
 					uint8_t maxEventNum = (param < 65) ? U8T(param - 5) : U8T(60);
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_MAX_EVENT_NUM, maxEventNum));
+					return (
+						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_MAX_EVENT_NUM, maxEventNum));
 					break;
 				}
 
@@ -716,7 +881,7 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_NEXT_GH_CNT, U8T(param)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_NEXT_GH_CNT, U8T(param)));
 					break;
 				}
 
@@ -725,9 +890,10 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_TIMING_READ_TIME_INTERVAL, U8T(param >> 8));
+					i2cConfigSend(
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_READ_TIME_INTERVAL, U8T(param >> 8));
 					return (i2cConfigSend(
-						&state->usbState, DEVICE_DVS, REGISTER_TIMING_READ_TIME_INTERVAL + 1, U8T(param)));
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_READ_TIME_INTERVAL + 1, U8T(param)));
 					break;
 				}
 
@@ -741,7 +907,7 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 			switch (paramAddr) {
 				case SAMSUNG_EVK_DVS_CROPPER_ENABLE: {
 					return (i2cConfigSend(
-						&state->usbState, DEVICE_DVS, REGISTER_CROPPER_BYPASS, (param) ? (0x00) : (0x01)));
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_BYPASS, (param) ? (0x00) : (0x01)));
 					break;
 				}
 
@@ -778,11 +944,11 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						startMask = 0xFF;
 					}
 
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CROPPER_Y_START_GROUP, startGroup);
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CROPPER_Y_START_MASK, startMask);
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_Y_START_GROUP, startGroup);
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_Y_START_MASK, startMask);
 
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CROPPER_Y_END_GROUP, endGroup);
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CROPPER_Y_END_MASK, endMask));
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_Y_END_GROUP, endGroup);
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_Y_END_MASK, endMask));
 					break;
 				}
 
@@ -791,9 +957,9 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CROPPER_X_START_ADDRESS, U8T(param >> 8));
-					return (
-						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CROPPER_X_START_ADDRESS + 1, U8T(param)));
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_X_START_ADDRESS, U8T(param >> 8));
+					return (i2cConfigSend(
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_X_START_ADDRESS + 1, U8T(param)));
 					break;
 				}
 
@@ -802,9 +968,9 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CROPPER_X_END_ADDRESS, U8T(param >> 8));
-					return (
-						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_CROPPER_X_END_ADDRESS + 1, U8T(param)));
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_X_END_ADDRESS, U8T(param >> 8));
+					return (i2cConfigSend(
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_X_END_ADDRESS + 1, U8T(param)));
 					break;
 				}
 
@@ -817,8 +983,8 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 		case SAMSUNG_EVK_DVS_ACTIVITY_DECISION:
 			switch (paramAddr) {
 				case SAMSUNG_EVK_DVS_ACTIVITY_DECISION_ENABLE: {
-					return (i2cConfigSend(
-						&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_BYPASS, (param) ? (0x00) : (0x01)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_BYPASS,
+						(param) ? (0x00) : (0x01)));
 					break;
 				}
 
@@ -828,9 +994,9 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					}
 
 					i2cConfigSend(
-						&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_POS_THRESHOLD, U8T(param >> 8));
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_POS_THRESHOLD, U8T(param >> 8));
 					return (i2cConfigSend(
-						&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_POS_THRESHOLD + 1, U8T(param)));
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_POS_THRESHOLD + 1, U8T(param)));
 					break;
 				}
 
@@ -840,9 +1006,9 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					}
 
 					i2cConfigSend(
-						&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_NEG_THRESHOLD, U8T(param >> 8));
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_NEG_THRESHOLD, U8T(param >> 8));
 					return (i2cConfigSend(
-						&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_NEG_THRESHOLD + 1, U8T(param)));
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_NEG_THRESHOLD + 1, U8T(param)));
 					break;
 				}
 
@@ -851,8 +1017,8 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (
-						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_DEC_RATE, U8T(param)));
+					return (i2cConfigSend(
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_DEC_RATE, U8T(param)));
 					break;
 				}
 
@@ -861,8 +1027,8 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (
-						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_DEC_TIME, U8T(param)));
+					return (i2cConfigSend(
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_DEC_TIME, U8T(param)));
 					break;
 				}
 
@@ -872,9 +1038,9 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					}
 
 					i2cConfigSend(
-						&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_POS_MAX_COUNT, U8T(param >> 8));
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_POS_MAX_COUNT, U8T(param >> 8));
 					return (i2cConfigSend(
-						&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_POS_MAX_COUNT + 1, U8T(param)));
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_POS_MAX_COUNT + 1, U8T(param)));
 					break;
 				}
 
@@ -889,52 +1055,56 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_RANGE_LOG: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
+							REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST,
-						(param) ? U8T(currVal | 0x08) : U8T(currVal & ~0x08)));
+					return (
+						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST,
+							(param) ? U8T(currVal | 0x08) : U8T(currVal & ~0x08)));
 					break;
 				}
 
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_RANGE_SF: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
+							REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST,
-						(param) ? U8T(currVal | 0x04) : U8T(currVal & ~0x04)));
+					return (
+						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST,
+							(param) ? U8T(currVal | 0x04) : U8T(currVal & ~0x04)));
 					break;
 				}
 
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_RANGE_ON: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
+							REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST,
-						(param) ? U8T(currVal | 0x02) : U8T(currVal & ~0x02)));
+					return (
+						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST,
+							(param) ? U8T(currVal | 0x02) : U8T(currVal & ~0x02)));
 					break;
 				}
 
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_RANGE_nRST: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
+							REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST,
-						(param) ? U8T(currVal | 0x01) : U8T(currVal & ~0x01)));
+					return (
+						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST,
+							(param) ? U8T(currVal | 0x01) : U8T(currVal & ~0x01)));
 					break;
 				}
 
@@ -942,13 +1112,13 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					uint8_t currVal = 0;
 
 					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
-							REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR, &currVal)) {
+							REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR, &currVal)) {
 						return (false);
 					}
 
-					return (
-						i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR,
-							(param) ? U8T(currVal | 0x10) : U8T(currVal & ~0x10)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS,
+						REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR,
+						(param) ? U8T(currVal | 0x10) : U8T(currVal & ~0x10)));
 					break;
 				}
 
@@ -960,23 +1130,25 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					uint8_t currVal = 0;
 
 					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
-							REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR, &currVal)) {
+							REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR, &currVal)) {
 						return (false);
 					}
 
 					return (i2cConfigSend(&state->usbState, DEVICE_DVS,
-						REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR, U8T((currVal & ~0x0C) | U8T(param << 2))));
+						REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR,
+						U8T((currVal & ~0x0C) | U8T(param << 2))));
 					break;
 				}
 
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_LEVEL_SF: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_LEVEL_SFOFF, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_LEVEL_SFOFF, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_LEVEL_SFOFF,
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_LEVEL_SFOFF,
 						(param) ? U8T(currVal | 0x10) : U8T(currVal & ~0x10)));
 					break;
 				}
@@ -984,11 +1156,12 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_LEVEL_nOFF: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_LEVEL_SFOFF, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_LEVEL_SFOFF, &currVal)) {
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_LEVEL_SFOFF,
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_LEVEL_SFOFF,
 						(param) ? U8T(currVal | 0x02) : U8T(currVal & ~0x02)));
 					break;
 				}
@@ -998,7 +1171,7 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_AMP, U8T(param)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_AMP, U8T(param)));
 					break;
 				}
 
@@ -1007,7 +1180,7 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_ON, U8T(param)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_ON, U8T(param)));
 					break;
 				}
 
@@ -1016,64 +1189,64 @@ bool samsungEVKConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_OFF, U8T(param)));
+					return (i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_OFF, U8T(param)));
 					break;
 				}
 
 				case SAMSUNG_EVK_DVS_BIAS_SIMPLE:
-					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_AMP, 0x04);
+					i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_AMP, 0x04);
 					i2cConfigSend(
-						&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR, 0x14);
+						&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR, 0x14);
 
 					switch (param) {
 						case SAMSUNG_EVK_DVS_BIAS_SIMPLE_VERY_LOW: {
-							i2cConfigSend(
-								&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, 0x06);
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_LEVEL_SFOFF, 0x7D);
+							i2cConfigSend(&state->usbState, DEVICE_DVS,
+								REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, 0x06);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_LEVEL_SFOFF, 0x7D);
 
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_ON, 0x06);
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_OFF, 0x02);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_ON, 0x06);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_OFF, 0x02);
 							break;
 						}
 
 						case SAMSUNG_EVK_DVS_BIAS_SIMPLE_LOW: {
-							i2cConfigSend(
-								&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, 0x06);
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_LEVEL_SFOFF, 0x7D);
+							i2cConfigSend(&state->usbState, DEVICE_DVS,
+								REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, 0x06);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_LEVEL_SFOFF, 0x7D);
 
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_ON, 0x03);
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_OFF, 0x05);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_ON, 0x03);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_OFF, 0x05);
 							break;
 						}
 
 						case SAMSUNG_EVK_DVS_BIAS_SIMPLE_HIGH: {
-							i2cConfigSend(
-								&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, 0x04);
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_LEVEL_SFOFF, 0x7F);
+							i2cConfigSend(&state->usbState, DEVICE_DVS,
+								REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, 0x04);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_LEVEL_SFOFF, 0x7F);
 
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_ON, 0x05);
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_OFF, 0x03);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_ON, 0x05);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_OFF, 0x03);
 							break;
 						}
 
 						case SAMSUNG_EVK_DVS_BIAS_SIMPLE_VERY_HIGH: {
-							i2cConfigSend(
-								&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, 0x04);
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_LEVEL_SFOFF, 0x7F);
+							i2cConfigSend(&state->usbState, DEVICE_DVS,
+								REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, 0x04);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_LEVEL_SFOFF, 0x7F);
 
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_ON, 0x02);
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_OFF, 0x06);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_ON, 0x02);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_OFF, 0x06);
 							break;
 						}
 
 						case SAMSUNG_EVK_DVS_BIAS_SIMPLE_DEFAULT:
 						default: {
-							i2cConfigSend(
-								&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, 0x06);
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_LEVEL_SFOFF, 0x7D);
+							i2cConfigSend(&state->usbState, DEVICE_DVS,
+								REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, 0x06);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_LEVEL_SFOFF, 0x7D);
 
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_ON, 0x00);
-							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_OFF, 0x08);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_ON, 0x00);
+							i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_OFF, 0x08);
 							break;
 						}
 					}
@@ -1127,7 +1300,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_MODE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_MODE, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_MODE, &currVal)) {
 						return (false);
 					}
 
@@ -1138,7 +1311,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_EVENT_FLATTEN: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_PACKET_FORMAT, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PACKET_FORMAT, &currVal)) {
 						return (false);
 					}
 
@@ -1149,7 +1323,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_EVENT_ON_ONLY: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_PACKET_FORMAT, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PACKET_FORMAT, &currVal)) {
 						return (false);
 					}
 
@@ -1160,7 +1335,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_EVENT_OFF_ONLY: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_CONTROL_PACKET_FORMAT, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PACKET_FORMAT, &currVal)) {
 						return (false);
 					}
 
@@ -1171,7 +1347,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_SUBSAMPLE_ENABLE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_ENABLE, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_ENABLE, &currVal)) {
 						return (false);
 					}
 
@@ -1182,7 +1358,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_AREA_BLOCKING_ENABLE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_ENABLE, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_ENABLE, &currVal)) {
 						return (false);
 					}
 
@@ -1193,7 +1369,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_DUAL_BINNING_ENABLE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_ENABLE, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_ENABLE, &currVal)) {
 						return (false);
 					}
 
@@ -1204,7 +1380,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_SUBSAMPLE_VERTICAL: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_SUBSAMPLE_RATIO, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_SUBSAMPLE_RATIO, &currVal)) {
 						return (false);
 					}
 
@@ -1215,7 +1392,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_SUBSAMPLE_HORIZONTAL: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_SUBSAMPLE_RATIO, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_SUBSAMPLE_RATIO, &currVal)) {
 						return (false);
 					}
 
@@ -1244,7 +1422,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_AREA_BLOCKING_18:
 				case SAMSUNG_EVK_DVS_AREA_BLOCKING_19: {
 					uint16_t regAddr
-						= REGISTER_DIGITAL_AREA_BLOCK + (2 * (paramAddr - SAMSUNG_EVK_DVS_AREA_BLOCKING_0));
+						= REGISTER_231Y_DIGITAL_AREA_BLOCK + (2 * (paramAddr - SAMSUNG_EVK_DVS_AREA_BLOCKING_0));
 
 					uint8_t currVal = 0;
 
@@ -1270,7 +1448,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_GLOBAL_RESET_ENABLE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_MODE_CONTROL, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_MODE_CONTROL, &currVal)) {
 						return (false);
 					}
 
@@ -1282,7 +1460,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					uint8_t currVal = 0;
 
 					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_GLOBAL_RESET_READOUT, &currVal)) {
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_GLOBAL_RESET_READOUT, &currVal)) {
 						return (false);
 					}
 
@@ -1293,7 +1471,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_GLOBAL_HOLD_ENABLE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_MODE_CONTROL, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_MODE_CONTROL, &currVal)) {
 						return (false);
 					}
 
@@ -1304,7 +1482,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_FIXED_READ_TIME_ENABLE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_FIXED_READ_TIME, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_FIXED_READ_TIME, &currVal)) {
 						return (false);
 					}
 
@@ -1315,7 +1494,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_EXTERNAL_TRIGGER_MODE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_DIGITAL_EXTERNAL_TRIGGER, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_EXTERNAL_TRIGGER, &currVal)) {
 						return (false);
 					}
 
@@ -1326,19 +1506,19 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_TIMING_ED: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GH_COUNT + 1, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GH_COUNT + 1, &currVal)) {
 						return (false);
 					}
 
 					*param = U32T(currVal << 8);
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GH_COUNT + 2, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GH_COUNT + 2, &currVal)) {
 						return (false);
 					}
 
 					*param |= currVal;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GH_COUNT, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GH_COUNT, &currVal)) {
 						return (false);
 					}
 
@@ -1349,19 +1529,19 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_TIMING_GH2GRS: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_COUNT + 1, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_COUNT + 1, &currVal)) {
 						return (false);
 					}
 
 					*param = U32T(currVal << 8);
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_COUNT + 2, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_COUNT + 2, &currVal)) {
 						return (false);
 					}
 
 					*param |= currVal;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_COUNT, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_COUNT, &currVal)) {
 						return (false);
 					}
 
@@ -1372,19 +1552,19 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_TIMING_GRS: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_END + 1, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_END + 1, &currVal)) {
 						return (false);
 					}
 
 					*param = U32T(currVal << 8);
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_END + 2, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_END + 2, &currVal)) {
 						return (false);
 					}
 
 					*param |= currVal;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_GRS_END, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_GRS_END, &currVal)) {
 						return (false);
 					}
 
@@ -1395,7 +1575,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_TIMING_GH2SEL: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_FIRST_SELX_START, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_FIRST_SELX_START, &currVal)) {
 						return (false);
 					}
 
@@ -1406,7 +1587,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_TIMING_SELW: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_SELX_WIDTH, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_SELX_WIDTH, &currVal)) {
 						return (false);
 					}
 
@@ -1417,7 +1598,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_TIMING_SEL2AY_R: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_AY_START, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_AY_START, &currVal)) {
 						return (false);
 					}
 
@@ -1428,7 +1609,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_TIMING_SEL2AY_F: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_AY_END, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_AY_END, &currVal)) {
 						return (false);
 					}
 
@@ -1439,7 +1620,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_TIMING_SEL2R_R: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_R_START, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_R_START, &currVal)) {
 						return (false);
 					}
 
@@ -1450,7 +1631,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_TIMING_SEL2R_F: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_R_END, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_R_END, &currVal)) {
 						return (false);
 					}
 
@@ -1461,14 +1642,15 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_TIMING_NEXT_SEL: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_NEXT_SELX_START, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_NEXT_SELX_START, &currVal)) {
 						return (false);
 					}
 
 					*param = U32T(currVal << 8);
 
 					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_TIMING_NEXT_SELX_START + 1, &currVal)) {
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_NEXT_SELX_START + 1, &currVal)) {
 						return (false);
 					}
 
@@ -1479,7 +1661,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_TIMING_NEXT_GH: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_NEXT_GH_CNT, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_NEXT_GH_CNT, &currVal)) {
 						return (false);
 					}
 
@@ -1490,14 +1672,15 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_TIMING_READ_FIXED: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_TIMING_READ_TIME_INTERVAL, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_READ_TIME_INTERVAL, &currVal)) {
 						return (false);
 					}
 
 					*param = U32T(currVal << 8);
 
 					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_TIMING_READ_TIME_INTERVAL + 1, &currVal)) {
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_TIMING_READ_TIME_INTERVAL + 1, &currVal)) {
 						return (false);
 					}
 
@@ -1516,7 +1699,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_CROPPER_ENABLE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_CROPPER_BYPASS, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_BYPASS, &currVal)) {
 						return (false);
 					}
 
@@ -1537,14 +1720,15 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_CROPPER_X_START_ADDRESS: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_CROPPER_X_START_ADDRESS, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_X_START_ADDRESS, &currVal)) {
 						return (false);
 					}
 
 					*param = U32T(currVal << 8);
 
 					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_CROPPER_X_START_ADDRESS + 1, &currVal)) {
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_X_START_ADDRESS + 1, &currVal)) {
 						return (false);
 					}
 
@@ -1555,13 +1739,15 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_CROPPER_X_END_ADDRESS: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_CROPPER_X_END_ADDRESS, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_X_END_ADDRESS, &currVal)) {
 						return (false);
 					}
 
 					*param = U32T(currVal << 8);
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_CROPPER_X_END_ADDRESS + 1, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_CROPPER_X_END_ADDRESS + 1, &currVal)) {
 						return (false);
 					}
 
@@ -1580,7 +1766,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_ACTIVITY_DECISION_ENABLE: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_BYPASS, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_BYPASS, &currVal)) {
 						return (false);
 					}
 
@@ -1592,14 +1779,14 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					uint8_t currVal = 0;
 
 					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_POS_THRESHOLD, &currVal)) {
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_POS_THRESHOLD, &currVal)) {
 						return (false);
 					}
 
 					*param = U32T(currVal << 8);
 
-					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_POS_THRESHOLD + 1, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
+							REGISTER_231Y_ACTIVITY_DECISION_POS_THRESHOLD + 1, &currVal)) {
 						return (false);
 					}
 
@@ -1611,14 +1798,14 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					uint8_t currVal = 0;
 
 					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_NEG_THRESHOLD, &currVal)) {
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_NEG_THRESHOLD, &currVal)) {
 						return (false);
 					}
 
 					*param = U32T(currVal << 8);
 
-					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_NEG_THRESHOLD + 1, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
+							REGISTER_231Y_ACTIVITY_DECISION_NEG_THRESHOLD + 1, &currVal)) {
 						return (false);
 					}
 
@@ -1630,7 +1817,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					uint8_t currVal = 0;
 
 					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_DEC_RATE, &currVal)) {
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_DEC_RATE, &currVal)) {
 						return (false);
 					}
 
@@ -1642,7 +1829,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					uint8_t currVal = 0;
 
 					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_DEC_TIME, &currVal)) {
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_DEC_TIME, &currVal)) {
 						return (false);
 					}
 
@@ -1654,14 +1841,14 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					uint8_t currVal = 0;
 
 					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_POS_MAX_COUNT, &currVal)) {
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_ACTIVITY_DECISION_POS_MAX_COUNT, &currVal)) {
 						return (false);
 					}
 
 					*param = U32T(currVal << 8);
 
-					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_ACTIVITY_DECISION_POS_MAX_COUNT + 1, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
+							REGISTER_231Y_ACTIVITY_DECISION_POS_MAX_COUNT + 1, &currVal)) {
 						return (false);
 					}
 
@@ -1680,8 +1867,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_RANGE_LOG: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
+							REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
 						return (false);
 					}
 
@@ -1692,8 +1879,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_RANGE_SF: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
+							REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
 						return (false);
 					}
 
@@ -1704,8 +1891,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_RANGE_ON: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
+							REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
 						return (false);
 					}
 
@@ -1716,8 +1903,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_RANGE_nRST: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(
-							&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
+							REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGSFONREST, &currVal)) {
 						return (false);
 					}
 
@@ -1729,7 +1916,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					uint8_t currVal = 0;
 
 					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
-							REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR, &currVal)) {
+							REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR, &currVal)) {
 						return (false);
 					}
 
@@ -1741,7 +1928,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 					uint8_t currVal = 0;
 
 					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS,
-							REGISTER_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR, &currVal)) {
+							REGISTER_231Y_BIAS_CURRENT_RANGE_SELECT_LOGALOGD_MONITOR, &currVal)) {
 						return (false);
 					}
 
@@ -1752,7 +1939,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_LEVEL_SF: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_LEVEL_SFOFF, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_LEVEL_SFOFF, &currVal)) {
 						return (false);
 					}
 
@@ -1763,7 +1951,8 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_LEVEL_nOFF: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_LEVEL_SFOFF, &currVal)) {
+					if (!i2cConfigReceive(
+							&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_LEVEL_SFOFF, &currVal)) {
 						return (false);
 					}
 
@@ -1774,7 +1963,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_AMP: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_AMP, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_AMP, &currVal)) {
 						return (false);
 					}
 
@@ -1785,7 +1974,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_ON: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_ON, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_ON, &currVal)) {
 						return (false);
 					}
 
@@ -1796,7 +1985,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 				case SAMSUNG_EVK_DVS_BIAS_CURRENT_OFF: {
 					uint8_t currVal = 0;
 
-					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_BIAS_CURRENT_OFF, &currVal)) {
+					if (!i2cConfigReceive(&state->usbState, DEVICE_DVS, REGISTER_231Y_BIAS_CURRENT_OFF, &currVal)) {
 						return (false);
 					}
 
