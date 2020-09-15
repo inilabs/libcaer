@@ -29,7 +29,6 @@ src_configure() {
 		-DENABLE_OPENCV="$(usex opencv 1 0)"
 		-DENABLE_STATIC="$(usex static-libs 1 0)"
 		-DUDEV_INSTALL=1
-		-DUDEV_SELINUX=0
 	)
 
 	cmake-utils_src_configure

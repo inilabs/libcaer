@@ -4,4 +4,4 @@
 	dh $@ --buildsystem=cmake
 
 override_dh_auto_configure:
-	dh_auto_configure -- -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-7 -DENABLE_STATIC=1 -DENABLE_OPENCV=1 -DENABLE_SERIALDEV=0 -DUDEV_SELINUX=1
+	dh_auto_configure -- -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-7 -DENABLE_STATIC=1 -DENABLE_OPENCV=1 -DENABLE_SERIALDEV=0 -DUDEV_INSTALL=1

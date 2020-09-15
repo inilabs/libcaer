@@ -27,7 +27,7 @@ Development files for libcaer, such as headers, pkg-config files, etc..
 %autosetup
 
 %build
-%cmake -DENABLE_STATIC=1 -DENABLE_OPENCV=1 -DENABLE_SERIALDEV=1 -DUDEV_SELINUX=1 .
+%cmake -DENABLE_STATIC=1 -DENABLE_OPENCV=1 -DENABLE_SERIALDEV=1 -DUDEV_INSTALL=1 .
 make %{?_smp_mflags}
 
 %install
