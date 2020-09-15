@@ -66,7 +66,7 @@ build_macosx:
     - cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DENABLE_STATIC=1 -DENABLE_OPENCV=1 -DENABLE_SERIALDEV=1 -DEXAMPLES_INSTALL=1 ..
     - make -j4
     - if [[ "$CI_COMMIT_BRANCH" != "master" ]] ; then exit 0; fi
-    - rm -Rf /usr/local/lib/libcaer.so* /usr/local/include/libcaer/ /usr/local/include/libcaercpp/ /usr/local/share/caer/
+    - rm -Rf /usr/local/lib/${CI_PROJECT_NAME}.so* /usr/local/include/${CI_PROJECT_NAME}/ /usr/local/include/${CI_PROJECT_NAME}cpp/ /usr/local/share/caer/
     - make install
   rules:
     - if: $CI_MERGE_REQUEST_ID
@@ -95,7 +95,7 @@ build_windows:
     - cmake -G "MSYS Makefiles" -DCMAKE_INSTALL_PREFIX=/mingw64 -DENABLE_STATIC=1 -DENABLE_OPENCV=1 -DENABLE_SERIALDEV=1 -DEXAMPLES_INSTALL=1 ..
     - make -j8
     - if [[ "$CI_COMMIT_BRANCH" != "master" ]] ; then exit 0; fi
-    - rm -Rf /mingw64/lib/libcaer.dll* /mingw64/include/libcaer/ /mingw64/include/libcaercpp/ /mingw64/share/caer/
+    - rm -Rf /mingw64/lib/${CI_PROJECT_NAME}.dll* /mingw64/include/${CI_PROJECT_NAME}/ /mingw64/include/${CI_PROJECT_NAME}cpp/ /mingw64/share/caer/
     - make install
   rules:
     - if: $CI_MERGE_REQUEST_ID
@@ -124,11 +124,43 @@ build_raspbian:
     - if [[ "$CI_COMMIT_BRANCH" != "master" ]] && [[ -z "$CI_COMMIT_TAG" ]] ; then exit 0; fi
     # Package artifact using CPack
     - cpack -G DEB
-    - mv "libcaer.armv7l.deb" "libcaer-raspbian-buster-$CI_COMMIT_REF_NAME.deb"
-    - aws s3 cp "libcaer-raspbian-buster-$CI_COMMIT_REF_NAME.deb" "s3://release.inivation.com/libcaer/raspbian/libcaer-raspbian-buster-$CI_COMMIT_REF_NAME.deb"
+    - mv "${CI_PROJECT_NAME}.armv7l.deb" "${CI_PROJECT_NAME}-raspbian-buster-${CI_COMMIT_REF_NAME}.deb"
+    - aws s3 cp "${CI_PROJECT_NAME}-raspbian-buster-${CI_COMMIT_REF_NAME}.deb" "s3://release.inivation.com/${CI_PROJECT_NAME}/raspbian/${CI_PROJECT_NAME}-raspbian-buster-${CI_COMMIT_REF_NAME}.deb"
+    - if [[ -z "$CI_COMMIT_TAG" ]] ; then exit 0; fi
+    - aws s3 cp "${CI_PROJECT_NAME}-raspbian-buster-${CI_COMMIT_REF_NAME}.deb" "s3://release.inivation.com/${CI_PROJECT_NAME}/raspbian/${CI_PROJECT_NAME}-raspbian-buster-latest.deb"
   rules:
     - if: $CI_MERGE_REQUEST_ID
     - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+  cache:
+    key: "${CI_JOB_NAME}-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .ccache
+    policy: pull-push
+
+build_mendel:
+  stage: build
+  before_script:
+    - export CCACHE_DIR="${CI_PROJECT_DIR}/.ccache"
+    - export CCACHE_BASEDIR="${CI_PROJECT_DIR}"
+    - export CCACHE_COMPILERCHECK="content"
+  tags:
+    - armv8
+    - mendel
+    - build
+  script:
+    - *change_build_dir
+    - cmake -DCMAKE_INSTALL_PREFIX=/usr -DENABLE_OPENCV=1 -DEXAMPLES_INSTALL=1 ..
+    - make -j1
+    - sudo rm -Rf /usr/lib/${CI_PROJECT_NAME}.so* /usr/include/${CI_PROJECT_NAME}/ /usr/include/${CI_PROJECT_NAME}cpp/ /usr/share/caer/ ./install_manifest.txt
+    - cpack -G DEB
+    - sudo make install
+    - mv "${CI_PROJECT_NAME}.aarch64.deb" "${CI_PROJECT_NAME}-mendel-eagle-${CI_COMMIT_REF_NAME}.deb"
+    - aws s3 cp "${CI_PROJECT_NAME}-mendel-eagle-${CI_COMMIT_REF_NAME}.deb" "s3://release.inivation.com/${CI_PROJECT_NAME}/mendel/${CI_PROJECT_NAME}-mendel-eagle-${CI_COMMIT_REF_NAME}.deb"
+    - if [[ -z "$CI_COMMIT_TAG" ]] ; then exit 0; fi
+    - aws s3 cp "${CI_PROJECT_NAME}-mendel-eagle-${CI_COMMIT_REF_NAME}.deb" "s3://release.inivation.com/${CI_PROJECT_NAME}/mendel/${CI_PROJECT_NAME}-mendel-eagle-latest.deb"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master"
     - if: $CI_COMMIT_TAG
   cache:
     key: "${CI_JOB_NAME}-${CI_COMMIT_REF_SLUG}"
@@ -221,11 +253,11 @@ release_ubuntu:
     - echo -e "5\ny\n" | gpg --no-tty --command-fd 0 --edit-key "${PPA_GPG_KEY_ID}" trust quit
   script:
     - cd packaging/ubuntu-source-package/
-    - ./packageUbuntu.sh --pkg-name libcaer --pkg-version "${CI_COMMIT_TAG}" --distro xenial --gpg-key-id "${PPA_GPG_KEY_ID}" --gpg-key-pass "${PPA_GPG_KEY_PASS}" --upload
+    - ./packageUbuntu.sh --pkg-name ${CI_PROJECT_NAME} --pkg-version "${CI_COMMIT_TAG}" --distro xenial --gpg-key-id "${PPA_GPG_KEY_ID}" --gpg-key-pass "${PPA_GPG_KEY_PASS}" --upload
     - sleep 60 # rate-limit connections to PPA upload server
-    - ./packageUbuntu.sh --pkg-name libcaer --pkg-version "${CI_COMMIT_TAG}" --distro bionic --gpg-key-id "${PPA_GPG_KEY_ID}" --gpg-key-pass "${PPA_GPG_KEY_PASS}" --upload
+    - ./packageUbuntu.sh --pkg-name ${CI_PROJECT_NAME} --pkg-version "${CI_COMMIT_TAG}" --distro bionic --gpg-key-id "${PPA_GPG_KEY_ID}" --gpg-key-pass "${PPA_GPG_KEY_PASS}" --upload
     - sleep 60 # rate-limit connections to PPA upload server
-    - ./packageUbuntu.sh --pkg-name libcaer --pkg-version "${CI_COMMIT_TAG}" --distro focal --gpg-key-id "${PPA_GPG_KEY_ID}" --gpg-key-pass "${PPA_GPG_KEY_PASS}" --upload
+    - ./packageUbuntu.sh --pkg-name ${CI_PROJECT_NAME} --pkg-version "${CI_COMMIT_TAG}" --distro focal --gpg-key-id "${PPA_GPG_KEY_ID}" --gpg-key-pass "${PPA_GPG_KEY_PASS}" --upload
   rules:
     - if: $CI_COMMIT_TAG
 
@@ -237,8 +269,8 @@ release_fedora:
     - cp "${COPR_API_KEY}" ~/.config/copr
   script:
     - cd packaging/fedora-source-package/
-    - ./packageFedora.sh --pkg-name libcaer --pkg-version "${CI_COMMIT_TAG}"
-    - copr-cli build --nowait inivation/inivation "libcaer-${CI_COMMIT_TAG}-0.fc31.src.rpm"
+    - ./packageFedora.sh --pkg-name ${CI_PROJECT_NAME} --pkg-version "${CI_COMMIT_TAG}"
+    - copr-cli build --nowait inivation/inivation "${CI_PROJECT_NAME}-${CI_COMMIT_TAG}-0.fc31.src.rpm"
   rules:
     - if: $CI_COMMIT_TAG
 
@@ -255,10 +287,10 @@ release_gentoo_arch_brew:
   script:
     - cd packaging/linux/
     # Gentoo release
-    - ./gentoo-release.sh --pkg-name libcaer --pkg-version "${CI_COMMIT_TAG}" --pkg-category dev-libs
+    - ./gentoo-release.sh --pkg-name ${CI_PROJECT_NAME} --pkg-version "${CI_COMMIT_TAG}" --pkg-category dev-libs
     # Arch release
-    - ./arch-release.sh --pkg-name libcaer --pkg-version "${CI_COMMIT_TAG}"
+    - ./arch-release.sh --pkg-name ${CI_PROJECT_NAME} --pkg-version "${CI_COMMIT_TAG}"
     # Brew release
-    - ./brew-release.sh --pkg-name libcaer --pkg-version "${CI_COMMIT_TAG}"
+    - ./brew-release.sh --pkg-name ${CI_PROJECT_NAME} --pkg-version "${CI_COMMIT_TAG}"
   rules:
     - if: $CI_COMMIT_TAG

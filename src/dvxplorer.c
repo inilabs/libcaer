@@ -811,7 +811,8 @@ bool dvXplorerConfigSet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 				case DVX_DVS_CHIP_AREA_BLOCKING_17:
 				case DVX_DVS_CHIP_AREA_BLOCKING_18:
 				case DVX_DVS_CHIP_AREA_BLOCKING_19: {
-					uint16_t regAddr = REGISTER_DIGITAL_AREA_BLOCK + (2 * (paramAddr - DVX_DVS_CHIP_AREA_BLOCKING_0));
+					uint16_t regAddr
+						= REGISTER_DIGITAL_AREA_BLOCK + U16T(2 * (paramAddr - DVX_DVS_CHIP_AREA_BLOCKING_0));
 
 					if (!spiConfigSend(&state->usbState, DEVICE_DVS, regAddr, U8T(param >> 8))) {
 						return (false);
@@ -1620,7 +1621,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x40) == true);
+					*param = ((currVal & 0x40) != 0);
 					break;
 				}
 
@@ -1631,7 +1632,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x20) == true);
+					*param = ((currVal & 0x20) != 0);
 					break;
 				}
 
@@ -1642,7 +1643,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x10) == true);
+					*param = ((currVal & 0x10) != 0);
 					break;
 				}
 
@@ -1653,7 +1654,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x04) == true);
+					*param = ((currVal & 0x04) != 0);
 					break;
 				}
 
@@ -1664,7 +1665,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x02) == true);
+					*param = ((currVal & 0x02) != 0);
 					break;
 				}
 
@@ -1734,7 +1735,8 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 				case DVX_DVS_CHIP_AREA_BLOCKING_17:
 				case DVX_DVS_CHIP_AREA_BLOCKING_18:
 				case DVX_DVS_CHIP_AREA_BLOCKING_19: {
-					uint16_t regAddr = REGISTER_DIGITAL_AREA_BLOCK + (2 * (paramAddr - DVX_DVS_CHIP_AREA_BLOCKING_0));
+					uint16_t regAddr
+						= REGISTER_DIGITAL_AREA_BLOCK + U16T(2 * (paramAddr - DVX_DVS_CHIP_AREA_BLOCKING_0));
 
 					uint32_t currVal = 0;
 
@@ -1764,7 +1766,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x02) == true);
+					*param = ((currVal & 0x02) != 0);
 					break;
 				}
 
@@ -2010,7 +2012,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = !currVal;
+					*param = (currVal == 0) ? (1) : (0);
 					break;
 				}
 
@@ -2074,7 +2076,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = !currVal;
+					*param = (currVal == 0) ? (1) : (0);
 					break;
 				}
 
@@ -2175,7 +2177,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x08) == true);
+					*param = ((currVal & 0x08) != 0);
 					break;
 				}
 
@@ -2187,7 +2189,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x04) == true);
+					*param = ((currVal & 0x04) != 0);
 					break;
 				}
 
@@ -2199,7 +2201,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x02) == true);
+					*param = ((currVal & 0x02) != 0);
 					break;
 				}
 
@@ -2211,7 +2213,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x01) == true);
+					*param = ((currVal & 0x01) != 0);
 					break;
 				}
 
@@ -2223,7 +2225,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x10) == true);
+					*param = ((currVal & 0x10) != 0);
 					break;
 				}
 
@@ -2246,7 +2248,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x10) == true);
+					*param = ((currVal & 0x10) != 0);
 					break;
 				}
 
@@ -2257,7 +2259,7 @@ bool dvXplorerConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr,
 						return (false);
 					}
 
-					*param = ((currVal & 0x02) == true);
+					*param = ((currVal & 0x02) != 0);
 					break;
 				}
 
@@ -2344,7 +2346,7 @@ bool dvXplorerDataStart(caerDeviceHandle cdh, void (*dataNotifyIncrease)(void *p
 	}
 
 	state->currentPackets.special
-		= caerSpecialEventPacketAllocate(SAMSUNG_EVKPECIAL_DEFAULT_SIZE, I16T(handle->info.deviceID), 0);
+		= caerSpecialEventPacketAllocate(DVXPLORER_SPECIAL_DEFAULT_SIZE, I16T(handle->info.deviceID), 0);
 	if (state->currentPackets.special == NULL) {
 		freeAllDataMemory(state);
 
@@ -2507,7 +2509,7 @@ static void dvXplorerEventTranslator(void *vhd, const uint8_t *buffer, size_t bu
 
 		if (state->currentPackets.special == NULL) {
 			state->currentPackets.special = caerSpecialEventPacketAllocate(
-				SAMSUNG_EVKPECIAL_DEFAULT_SIZE, I16T(handle->info.deviceID), state->timestamps.wrapOverflow);
+				DVXPLORER_SPECIAL_DEFAULT_SIZE, I16T(handle->info.deviceID), state->timestamps.wrapOverflow);
 			if (state->currentPackets.special == NULL) {
 				dvXplorerLog(CAER_LOG_CRITICAL, handle, "Failed to allocate special event packet.");
 				return;
@@ -2751,7 +2753,7 @@ static void dvXplorerEventTranslator(void *vhd, const uint8_t *buffer, size_t bu
 						break;
 					}
 
-					bool polarity  = !(data & 0x0100);
+					bool polarity  = ((data & 0x0100) == 0);
 					uint16_t lastY = (code == 3) ? (state->dvs.lastYG1) : (state->dvs.lastYG2);
 
 					for (uint16_t i = 0, mask = 0x0001; i < 8; i++, mask <<= 1) {
@@ -2785,7 +2787,7 @@ static void dvXplorerEventTranslator(void *vhd, const uint8_t *buffer, size_t bu
 				case 4: {
 					// Decode address.
 					uint16_t group1Address = data & 0x003F;
-					uint16_t group2Offset  = (data >> 6) & 0x001F;
+					uint16_t group2Offset  = U16T(data >> 6) & 0x001F;
 					uint16_t group2Address
 						= (data & 0x0800) ? (group1Address - group2Offset) : (group1Address + group2Offset);
 
@@ -2866,7 +2868,7 @@ static void dvXplorerEventTranslator(void *vhd, const uint8_t *buffer, size_t bu
 									caerIMU6EventSetAccelZ(&state->imu.currentEvent, accelZ / state->imu.accelScale);
 
 									// IMU parser count depends on which data is present.
-									if (!(state->imu.type & IMU_TYPE_TEMP)) {
+									if ((state->imu.type & IMU_TYPE_TEMP) == 0) {
 										if (state->imu.type & IMU_TYPE_GYRO) {
 											// No temperature, but gyro.
 											state->imu.count = U8T(state->imu.count + 2);
@@ -2886,7 +2888,7 @@ static void dvXplorerEventTranslator(void *vhd, const uint8_t *buffer, size_t bu
 									caerIMU6EventSetTemp(&state->imu.currentEvent, (temp / 512.0F) + 23.0F);
 
 									// IMU parser count depends on which data is present.
-									if (!(state->imu.type & IMU_TYPE_GYRO)) {
+									if ((state->imu.type & IMU_TYPE_GYRO) == 0) {
 										// No others enabled.
 										state->imu.count = U8T(state->imu.count + 6);
 									}
@@ -2944,7 +2946,7 @@ static void dvXplorerEventTranslator(void *vhd, const uint8_t *buffer, size_t bu
 							state->imu.gyroScale  = calculateIMUGyroScale(data & 0x07);
 
 							// Set expected type of data to come from IMU (accel, gyro, temp).
-							state->imu.type = (data >> 5) & 0x07;
+							state->imu.type = U8T(data >> 5) & 0x07;
 
 							// IMU parser start count depends on which data is present.
 							if (state->imu.type & IMU_TYPE_ACCEL) {

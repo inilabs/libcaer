@@ -1,3 +1,14 @@
+Release 3.3.8 - XX.09.2020
+
+NEW FEATURES
+- Linux Udev: simplify udev rules into one file (issue #114).
+
+BUG FIXES
+- Samsung EVK: allow multiple EVKs to be selected by a temporary
+  serial number generated from USB bus addresses (issue #113).
+- Samsung EVK: more robust parser for 231Y chip data (issue #115).
+
+
 Release 3.3.7 - 07.05.2020
 
 BUG FIXES

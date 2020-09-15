@@ -497,7 +497,6 @@ bool caerFilterDVSNoiseConfigSet(caerFilterDVSNoise noiseFilter, uint8_t paramAd
 		default:
 			// Unrecognized or invalid parameter address.
 			return (false);
-			break;
 	}
 
 	// Done!
@@ -600,7 +599,6 @@ bool caerFilterDVSNoiseConfigGet(caerFilterDVSNoise noiseFilter, uint8_t paramAd
 		default:
 			// Unrecognized or invalid parameter address.
 			return (false);
-			break;
 	}
 
 	// Done!

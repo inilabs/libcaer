@@ -13,9 +13,9 @@ using namespace std;
 
 static atomic_bool globalShutdown(false);
 
-static void globalShutdownSignalHandler(int signal) {
+static void globalShutdownSignalHandler(int sig) {
 	// Simply set the running flag to false on SIGTERM and SIGINT (CTRL+C) for global shutdown.
-	if (signal == SIGTERM || signal == SIGINT) {
+	if ((sig == SIGTERM) || (sig == SIGINT)) {
 		globalShutdown.store(true);
 	}
 }
@@ -26,7 +26,7 @@ static void usbShutdownHandler(void *ptr) {
 	globalShutdown.store(true);
 }
 
-int main(void) {
+int main() {
 // Install signal handler for global shutdown.
 #if defined(_WIN32)
 	if (signal(SIGTERM, &globalShutdownSignalHandler) == SIG_ERR) {
@@ -49,13 +49,13 @@ int main(void) {
 	sigaddset(&shutdownAction.sa_mask, SIGTERM);
 	sigaddset(&shutdownAction.sa_mask, SIGINT);
 
-	if (sigaction(SIGTERM, &shutdownAction, NULL) == -1) {
+	if (sigaction(SIGTERM, &shutdownAction, nullptr) == -1) {
 		libcaer::log::log(libcaer::log::logLevel::CRITICAL, "ShutdownAction",
 			"Failed to set signal handler for SIGTERM. Error: %d.", errno);
 		return (EXIT_FAILURE);
 	}
 
-	if (sigaction(SIGINT, &shutdownAction, NULL) == -1) {
+	if (sigaction(SIGINT, &shutdownAction, nullptr) == -1) {
 		libcaer::log::log(libcaer::log::logLevel::CRITICAL, "ShutdownAction",
 			"Failed to set signal handler for SIGINT. Error: %d.", errno);
 		return (EXIT_FAILURE);
@@ -173,7 +173,7 @@ int main(void) {
 				cv::imshow("PLOT_EVENTS", cvEvents);
 				cv::waitKey(1);
 
-				printf("Current max event rate: %f (momentary), %f (sustaiend) MEvt/s.\n", maxSmallMevts, maxBigMevts);
+				printf("Current max event rate: %f (momentary), %f (sustained) MEvt/s.\n", maxSmallMevts, maxBigMevts);
 			}
 		}
 	}

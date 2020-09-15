@@ -5,7 +5,8 @@ static void SamsungRC0SInit(samsungEVKHandle handle);
 
 static void samsungEVKLog(enum caer_log_level logLevel, samsungEVKHandle handle, const char *format, ...)
 	ATTRIBUTE_FORMAT(3);
-static void samsungEVKEventTranslator(void *vhd, const uint8_t *buffer, size_t bytesSent);
+static void samsungEVKEventTranslator(void *vhd, const uint8_t *buffer, const size_t bytesSent);
+static void resetParser(samsungEVKHandle handle, const char *reason);
 
 static bool i2cConfigSend(usbState state, uint16_t deviceAddr, uint16_t byteAddr, uint8_t param);
 static bool i2cConfigReceive(usbState state, uint16_t deviceAddr, uint16_t byteAddr, uint8_t *param);
@@ -189,7 +190,7 @@ caerDeviceHandle samsungEVKOpen(
 	// Setup USB.
 	usbSetDataCallback(&state->usbState, &samsungEVKEventTranslator, handle);
 	usbSetDataEndpoint(&state->usbState, SAMSUNG_EVK_DATA_ENDPOINT);
-	usbSetTransfersNumber(&state->usbState, 8);
+	usbSetTransfersNumber(&state->usbState, 16);
 	usbSetTransfersSize(&state->usbState, 8192);
 
 	// Start USB handling thread.
@@ -241,6 +242,14 @@ caerDeviceHandle samsungEVKOpen(
 		SamsungRC0SInit(handle);
 	}
 
+	// Setup data parser.
+	resetParser(handle, "startup");
+
+	state->timestamps.referenceOverflow = 0;
+	state->timestamps.lastReference     = -1;
+	// currTimestamp initialized to zero by calloc().
+	// lastTimestamp always reset when setting currTimestamp.
+
 	samsungEVKLog(CAER_LOG_DEBUG, handle, "Initialized device successfully with USB Bus=%" PRIu8 ":Addr=%" PRIu8 ".",
 		handle->info.deviceUSBBusNumber, handle->info.deviceUSBDeviceAddress);
 
@@ -267,8 +276,8 @@ static void Samsung231YInit(samsungEVKHandle handle) {
 	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_CLOCK_DIVIDER_SYS, 0xA0); // Divide freq by 10.
 	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PARALLEL_OUT_CONTROL, 0x00);
 	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PARALLEL_OUT_ENABLE, 0x01);
-	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PACKET_FORMAT,
-		0x00); // TODO: 0x80 to enable MGROUP compression.
+	i2cConfigSend(
+		&state->usbState, DEVICE_DVS, REGISTER_231Y_CONTROL_PACKET_FORMAT, 0x80); // Enable MGROUP compression.
 
 	// Digital settings.
 	i2cConfigSend(&state->usbState, DEVICE_DVS, REGISTER_231Y_DIGITAL_TIMESTAMP_SUBUNIT, 0x31);
@@ -1322,7 +1331,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x40) == true);
+					*param = ((currVal & 0x40) != 0);
 					break;
 				}
 
@@ -1334,7 +1343,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x20) == true);
+					*param = ((currVal & 0x20) != 0);
 					break;
 				}
 
@@ -1346,7 +1355,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x10) == true);
+					*param = ((currVal & 0x10) != 0);
 					break;
 				}
 
@@ -1357,7 +1366,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x04) == true);
+					*param = ((currVal & 0x04) != 0);
 					break;
 				}
 
@@ -1368,7 +1377,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x02) == true);
+					*param = ((currVal & 0x02) != 0);
 					break;
 				}
 
@@ -1391,7 +1400,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x38) >> 3);
+					*param = (U8T(currVal & 0x38) >> 3);
 					break;
 				}
 
@@ -1458,7 +1467,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x02) == true);
+					*param = ((currVal & 0x02) != 0);
 					break;
 				}
 
@@ -1709,7 +1718,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = !currVal;
+					*param = (currVal == 0) ? (1) : (0);
 					break;
 				}
 
@@ -1777,7 +1786,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = !currVal;
+					*param = (currVal == 0) ? (1) : (0);
 					break;
 				}
 
@@ -1878,7 +1887,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x08) == true);
+					*param = ((currVal & 0x08) != 0);
 					break;
 				}
 
@@ -1890,7 +1899,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x04) == true);
+					*param = ((currVal & 0x04) != 0);
 					break;
 				}
 
@@ -1902,7 +1911,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x02) == true);
+					*param = ((currVal & 0x02) != 0);
 					break;
 				}
 
@@ -1914,7 +1923,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x01) == true);
+					*param = ((currVal & 0x01) != 0);
 					break;
 				}
 
@@ -1926,7 +1935,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x10) == true);
+					*param = ((currVal & 0x10) != 0);
 					break;
 				}
 
@@ -1938,7 +1947,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x0C) >> 2);
+					*param = (U8T(currVal & 0x0C) >> 2);
 					break;
 				}
 
@@ -1950,7 +1959,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x10) == true);
+					*param = ((currVal & 0x10) != 0);
 					break;
 				}
 
@@ -1962,7 +1971,7 @@ bool samsungEVKConfigGet(caerDeviceHandle cdh, int8_t modAddr, uint8_t paramAddr
 						return (false);
 					}
 
-					*param = ((currVal & 0x02) == true);
+					*param = ((currVal & 0x02) != 0);
 					break;
 				}
 
@@ -2122,7 +2131,19 @@ static inline bool ensureSpaceForEvents(
 	return (true);
 }
 
-static void samsungEVKEventTranslator(void *vhd, const uint8_t *buffer, size_t bufferSize) {
+static void resetParser(samsungEVKHandle handle, const char *reason) {
+	samsungEVKState state = &handle->state;
+
+	state->dvs.lastColumn       = -1;
+	state->timestamps.reference = -1;
+
+	state->timestamps.lastUsedSub       = -1;
+	state->timestamps.lastUsedReference = -1;
+
+	samsungEVKLog(CAER_LOG_INFO, handle, "Parser reset, reason: %s.", reason);
+}
+
+static void samsungEVKEventTranslator(void *vhd, const uint8_t *buffer, const size_t bufferSize) {
 	samsungEVKHandle handle = vhd;
 	samsungEVKState state   = &handle->state;
 
@@ -2134,11 +2155,11 @@ static void samsungEVKEventTranslator(void *vhd, const uint8_t *buffer, size_t b
 		return;
 	}
 
-	// Truncate off any extra partial event.
+	// Discard buffers with incorrect length.
 	if ((bufferSize & 0x03) != 0) {
 		samsungEVKLog(
 			CAER_LOG_ALERT, handle, "%zu bytes received via USB, which is not a multiple of four.", bufferSize);
-		bufferSize &= ~((size_t) 0x03);
+		return;
 	}
 
 	for (size_t bufferPos = 0; bufferPos < bufferSize; bufferPos += 4) {
@@ -2171,78 +2192,141 @@ static void samsungEVKEventTranslator(void *vhd, const uint8_t *buffer, size_t b
 
 		uint32_t event = be32toh(*((const uint32_t *) (&buffer[bufferPos])));
 
-		if (event & 0x80000000) {
-			if (state->container.currentPacketContainerCommitTimestamp == -1) {
-				// No timestamp received yet.
+		if ((event & 0x80000000U) != 0) {
+			if (state->dvs.lastColumn < 0) {
+				// Wait until first column start has come in, so that lastColumn
+				// and timestamps have been initialized properly.
 				continue;
 			}
 
 			// SGROUP or MGROUP event.
-			if (event & 0x76000000) {
-				// TODO: MGROUP support.
-				samsungEVKLog(CAER_LOG_CRITICAL, handle, "MGROUP not handled.");
+			// Decode address.
+			int32_t group1Address = (event >> 18) & 0x003F;
+			int32_t group2Address = group1Address + I16T((event >> 26) & 0x001F);
+
+			// 8 pixels per group.
+			group1Address *= 8;
+			group2Address *= 8;
+
+			// Check range conformity.
+			if (group1Address >= handle->info.dvsSizeY) {
+				samsungEVKLog(CAER_LOG_ERROR, handle, "DVS: Group1 Y address out of range (0-%d): %u.",
+					handle->info.dvsSizeY - 1, group1Address);
+				continue; // Skip invalid G1 Y address.
 			}
-			else {
-				// SGROUP address.
-				uint16_t groupAddr = (event >> 18) & 0x003F;
 
-				groupAddr *= 8; // 8 pixels per group.
+			if (group2Address >= handle->info.dvsSizeY) {
+				samsungEVKLog(CAER_LOG_ERROR, handle, "DVS: Group2 Y address out of range (0-%d): %u.",
+					handle->info.dvsSizeY - 1, group2Address);
+				continue; // Skip invalid G2 Y address.
+			}
 
-				// 8-pixel group, two polarities, up to 16 events can be generated.
-				if (ensureSpaceForEvents((caerEventPacketHeader *) &state->currentPackets.polarity,
-						(size_t) state->currentPackets.polarityPosition, 16, handle)) {
-					for (uint16_t i = 0, mask = 0x8000; i < 16; i++, mask >>= 1) {
-						// Check if event present first.
-						if ((event & mask) == 0) {
-							continue;
-						}
+			// Group addresses can happen out of order when MGROUP compression is enabled.
+			// No extra checks can thus be done, and reordering may be required.
 
-						bool polarity   = (i >= 8);
-						uint16_t offset = 7 - (i & 0x07);
+			// Two 8-pixel groups, up to 16 events can be generated.
+			if (!ensureSpaceForEvents((caerEventPacketHeader *) &state->currentPackets.polarity,
+					(size_t) state->currentPackets.polarityPosition, 16, handle)) {
+				continue;
+			}
 
-						// Received event!
-						caerPolarityEvent currentPolarityEvent = caerPolarityEventPacketGetEvent(
-							state->currentPackets.polarity, state->currentPackets.polarityPosition);
+			uint8_t group1Events = (event >> 0) & 0x00FF;
+			bool group1Polarity  = (((event >> 16) & 0x01) == 0); // ON polarity is 0 here.
 
-						// Timestamp at event-stream insertion point.
-						caerPolarityEventSetTimestamp(currentPolarityEvent, state->timestamps.current);
-						caerPolarityEventSetPolarity(currentPolarityEvent, polarity);
-						caerPolarityEventSetX(currentPolarityEvent, state->dvs.lastX);
-						caerPolarityEventSetY(currentPolarityEvent, groupAddr + offset);
-						caerPolarityEventValidate(currentPolarityEvent, state->currentPackets.polarity);
-						state->currentPackets.polarityPosition++;
-					}
+			for (uint8_t i = 0, mask = 0x01; i < 8; i++, mask = U8T(mask << 1)) {
+				// Check if event present first.
+				if ((group1Events & mask) == 0) {
+					continue;
 				}
+
+				// Received event!
+				caerPolarityEvent currentPolarityEvent = caerPolarityEventPacketGetEvent(
+					state->currentPackets.polarity, state->currentPackets.polarityPosition);
+
+				// Timestamp at event-stream insertion point.
+				caerPolarityEventSetTimestamp(currentPolarityEvent, state->timestamps.current);
+				caerPolarityEventSetPolarity(currentPolarityEvent, group1Polarity);
+				caerPolarityEventSetX(currentPolarityEvent, U16T(state->dvs.lastColumn));
+				caerPolarityEventSetY(currentPolarityEvent, U16T(group1Address + i));
+				caerPolarityEventValidate(currentPolarityEvent, state->currentPackets.polarity);
+				state->currentPackets.polarityPosition++;
+			}
+
+			uint8_t group2Events = (event >> 8) & 0x00FF;
+			bool group2Polarity  = (((event >> 17) & 0x01) == 0); // ON polarity is 0 here.
+
+			for (uint8_t i = 0, mask = 0x01; i < 8; i++, mask = U8T(mask << 1)) {
+				// Check if event present first.
+				if ((group2Events & mask) == 0) {
+					continue;
+				}
+
+				// Received event!
+				caerPolarityEvent currentPolarityEvent = caerPolarityEventPacketGetEvent(
+					state->currentPackets.polarity, state->currentPackets.polarityPosition);
+
+				// Timestamp at event-stream insertion point.
+				caerPolarityEventSetTimestamp(currentPolarityEvent, state->timestamps.current);
+				caerPolarityEventSetPolarity(currentPolarityEvent, group2Polarity);
+				caerPolarityEventSetX(currentPolarityEvent, U16T(state->dvs.lastColumn));
+				caerPolarityEventSetY(currentPolarityEvent, U16T(group2Address + i));
+				caerPolarityEventValidate(currentPolarityEvent, state->currentPackets.polarity);
+				state->currentPackets.polarityPosition++;
 			}
 		}
 		else {
 			// COLUMN event.
-			if (event & 0x04000000) {
-				uint16_t columnAddr   = event & 0x03FF;
-				uint16_t timestampSub = (event >> 11) & 0x03FF;
-				bool startOfFrame     = (event >> 21) & 0x01;
+			if ((event & 0x04000000U) != 0) {
+				if (state->timestamps.reference < 0) {
+					// Wait until first timestamp reference in (every 1ms),
+					// so that time-relative fields have been initialized properly.
+					continue;
+				}
 
-				state->dvs.lastX = columnAddr;
+				bool startOfFrame  = (event >> 21) & 0x01;
+				int16_t columnAddr = event & 0x03FF;
+
+				if (columnAddr >= handle->info.dvsSizeX) {
+					samsungEVKLog(CAER_LOG_ERROR, handle, "DVS: X address out of range (0-%d): %u.",
+						handle->info.dvsSizeX - 1, columnAddr);
+					continue; // Skip invalid X address (don't update lastX).
+				}
 
 				if (startOfFrame) {
+					int16_t timestampSub = (event >> 11) & 0x03FF;
+
 					if (state->timestamps.reference == state->timestamps.lastUsedReference
 						&& timestampSub <= state->timestamps.lastUsedSub) {
 						// Reference did not change, but sub-timestamp did wrap around.
 						// We must have lost a main reference timestamp due to high traffic.
-						// In this case we increase manually by 1ms, as if we'd received it.
-						state->timestamps.reference += 1000;
+						// So we wait until the next reference timestamp comes in.
+						resetParser(handle, "timestamp reference lost");
+						continue;
 					}
 
 					// Get timestamp for rest of this frame.
-					uint64_t currTimestamp = state->timestamps.reference + U64T(timestampSub);
+					state->timestamps.lastTimestamp = state->timestamps.currTimestamp;
+					state->timestamps.currTimestamp = state->timestamps.reference + timestampSub;
+
+					if (state->timestamps.lastTimestamp >= state->timestamps.currTimestamp) {
+						// This should be impossible, since offset and reference are always
+						// increasing, and timestampSub wraps are handled above.
+						samsungEVKLog(CAER_LOG_ERROR, handle,
+							"non strictly-monotonic timestamp detected: lastTimestamp=%ld, "
+							"currentTimestamp=%ld, difference=%ld.",
+							state->timestamps.lastTimestamp, state->timestamps.currTimestamp,
+							(state->timestamps.lastTimestamp - state->timestamps.currTimestamp));
+					}
 
 					state->timestamps.lastUsedReference = state->timestamps.reference;
 					state->timestamps.lastUsedSub       = timestampSub;
 
+					// Get timestamp for rest of this frame.
 					state->timestamps.last    = state->timestamps.current;
-					state->timestamps.current = (currTimestamp & 0x7FFFFFFF);
+					state->timestamps.current = (U64T(state->timestamps.currTimestamp) & 0x7FFFFFFF);
 
-					int32_t currOverflow = ((currTimestamp >> TS_OVERFLOW_SHIFT) & 0x7FFFFFFF);
+					int32_t currOverflow
+						= (U64T(U64T(state->timestamps.currTimestamp) >> TS_OVERFLOW_SHIFT) & 0x7FFFFFFF);
 					if (currOverflow != state->timestamps.wrapOverflow) {
 						state->timestamps.wrapOverflow = currOverflow;
 						state->timestamps.last         = 0;
@@ -2255,15 +2339,27 @@ static void samsungEVKEventTranslator(void *vhd, const uint8_t *buffer, size_t b
 
 					containerGenerationCommitTimestampInit(&state->container, state->timestamps.current);
 
-					samsungEVKLog(CAER_LOG_DEBUG, handle, "Start of Frame column marker detected.");
-
-					// TODO: EVENT_READOUT_START special event disabled for now, extra info not used by any client.
+					samsungEVKLog(CAER_LOG_DEBUG, handle, "Start of Frame detected.");
 				}
-			}
+				// Start-of-frame not yet seen, ignore.
+				else if (state->dvs.lastColumn < 0) {
+					continue;
+				}
+				else {
+					// If not a start-of-frame column, address must always increase.
+					// If it jumps back, we must have lost data due to high traffic.
+					// So we reset and wait to re-sync time and data.
+					if (columnAddr <= state->dvs.lastColumn) {
+						resetParser(handle, "column address illegal jump");
+						continue;
+					}
+				}
 
+				state->dvs.lastColumn = columnAddr;
+			}
 			// TIMESTAMP event.
-			if (event & 0x08000000) {
-				uint32_t timestampRef = event & 0x003FFFFF;
+			else if ((event & 0x08000000U) != 0) {
+				int32_t timestampRef = event & 0x003FFFFF;
 
 				// New reference timestamp is smaller, must have overflown its 22 bits.
 				if (timestampRef <= state->timestamps.lastReference) {
@@ -2273,10 +2369,13 @@ static void samsungEVKEventTranslator(void *vhd, const uint8_t *buffer, size_t b
 				state->timestamps.lastReference = timestampRef;
 
 				// Generate full 64bit reference timestamp, with overflow added.
-				state->timestamps.reference = (U64T(state->timestamps.referenceOverflow << 22) | U64T(timestampRef));
+				state->timestamps.reference = (I64T(U64T(state->timestamps.referenceOverflow) << 22) + timestampRef);
 
 				// In ms, convert to µs.
 				state->timestamps.reference *= 1000;
+			}
+			else {
+				samsungEVKLog(CAER_LOG_ERROR, handle, "Unknown event = %X.", event);
 			}
 		}
 

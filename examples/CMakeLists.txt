@@ -43,6 +43,10 @@ IF (ENABLE_OPENCV)
 	ADD_EXECUTABLE(samsung_evk samsung_evk.cpp)
 	TARGET_LINK_LIBRARIES(samsung_evk PRIVATE caer ${OpenCV_LIBS})
 	INSTALL(TARGETS samsung_evk DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/caer/examples)
+
+	ADD_EXECUTABLE(dvx_bw_test dvx_bw_test.cpp)
+	TARGET_LINK_LIBRARIES(dvx_bw_test PRIVATE caer ${OpenCV_LIBS})
+	INSTALL(TARGETS dvx_bw_test DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/caer/examples)
 ENDIF()
 
 ADD_EXECUTABLE(davis_enable_aer davis_enable_aer.cpp)
