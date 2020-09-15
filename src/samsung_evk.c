@@ -2201,7 +2201,7 @@ static void samsungEVKEventTranslator(void *vhd, const uint8_t *buffer, const si
 
 			// SGROUP or MGROUP event.
 			// Decode address.
-			int32_t group1Address = (event >> 18) & 0x003F;
+			int32_t group1Address = (event >> 18) & 0x007F;
 			int32_t group2Address = group1Address + I16T((event >> 26) & 0x001F);
 
 			// 8 pixels per group.
@@ -2284,7 +2284,7 @@ static void samsungEVKEventTranslator(void *vhd, const uint8_t *buffer, const si
 				}
 
 				bool startOfFrame  = (event >> 21) & 0x01;
-				int16_t columnAddr = event & 0x03FF;
+				int16_t columnAddr = event & 0x07FF;
 
 				if (columnAddr >= handle->info.dvsSizeX) {
 					samsungEVKLog(CAER_LOG_ERROR, handle, "DVS: X address out of range (0-%d): %u.",
