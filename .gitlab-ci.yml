@@ -5,7 +5,7 @@
 
 .ubuntu_curr_builder: &ubuntu_curr_builder
   stage: build
-  image: inivation/ubuntu_minimal:rolling
+  image: inivation/ubuntu_base:rolling
   # Variables is not getting merged, so we use before_script to set CCACHE vars.
   before_script:
     - export CCACHE_DIR="${CI_PROJECT_DIR}/.ccache"
@@ -106,72 +106,10 @@ build_windows:
       - .ccache
     policy: pull-push
 
-build_raspbian:
-  stage: build
-  tags:
-    - docker
-    - raspbian
-    - build
-  image: inivation/raspbian:buster
-  variables:
-    CCACHE_DIR: "${CI_PROJECT_DIR}/.ccache"
-    CCACHE_BASEDIR: "${CI_PROJECT_DIR}"
-    CCACHE_COMPILERCHECK: "content"
-  script:
-    - *change_build_dir
-    - cmake -DCMAKE_INSTALL_PREFIX=/usr -DENABLE_STATIC=1 -DENABLE_OPENCV=1 -DENABLE_SERIALDEV=1 -DEXAMPLES_INSTALL=1 ..
-    - make -j4
-    - if [[ "$CI_COMMIT_BRANCH" != "master" ]] && [[ -z "$CI_COMMIT_TAG" ]] ; then exit 0; fi
-    # Package artifact using CPack
-    - cpack -G DEB
-    - mv "${CI_PROJECT_NAME}.armv7l.deb" "${CI_PROJECT_NAME}-raspbian-buster-${CI_COMMIT_REF_NAME}.deb"
-    - aws s3 cp "${CI_PROJECT_NAME}-raspbian-buster-${CI_COMMIT_REF_NAME}.deb" "s3://release.inivation.com/${CI_PROJECT_NAME}/raspbian/${CI_PROJECT_NAME}-raspbian-buster-${CI_COMMIT_REF_NAME}.deb"
-    - if [[ -z "$CI_COMMIT_TAG" ]] ; then exit 0; fi
-    - aws s3 cp "${CI_PROJECT_NAME}-raspbian-buster-${CI_COMMIT_REF_NAME}.deb" "s3://release.inivation.com/${CI_PROJECT_NAME}/raspbian/${CI_PROJECT_NAME}-raspbian-buster-latest.deb"
-  rules:
-    - if: $CI_MERGE_REQUEST_ID
-    - if: $CI_COMMIT_BRANCH
-    - if: $CI_COMMIT_TAG
-  cache:
-    key: "${CI_JOB_NAME}-${CI_COMMIT_REF_SLUG}"
-    paths:
-      - .ccache
-    policy: pull-push
-
-build_mendel:
-  stage: build
-  before_script:
-    - export CCACHE_DIR="${CI_PROJECT_DIR}/.ccache"
-    - export CCACHE_BASEDIR="${CI_PROJECT_DIR}"
-    - export CCACHE_COMPILERCHECK="content"
-  tags:
-    - armv8
-    - mendel
-    - build
-  script:
-    - *change_build_dir
-    - cmake -DCMAKE_INSTALL_PREFIX=/usr -DENABLE_OPENCV=1 -DEXAMPLES_INSTALL=1 ..
-    - make -j1
-    - sudo rm -Rf /usr/lib/${CI_PROJECT_NAME}.so* /usr/include/${CI_PROJECT_NAME}/ /usr/include/${CI_PROJECT_NAME}cpp/ /usr/share/caer/ ./install_manifest.txt
-    - cpack -G DEB
-    - sudo make install
-    - mv "${CI_PROJECT_NAME}.aarch64.deb" "${CI_PROJECT_NAME}-mendel-eagle-${CI_COMMIT_REF_NAME}.deb"
-    - aws s3 cp "${CI_PROJECT_NAME}-mendel-eagle-${CI_COMMIT_REF_NAME}.deb" "s3://release.inivation.com/${CI_PROJECT_NAME}/mendel/${CI_PROJECT_NAME}-mendel-eagle-${CI_COMMIT_REF_NAME}.deb"
-    - if [[ -z "$CI_COMMIT_TAG" ]] ; then exit 0; fi
-    - aws s3 cp "${CI_PROJECT_NAME}-mendel-eagle-${CI_COMMIT_REF_NAME}.deb" "s3://release.inivation.com/${CI_PROJECT_NAME}/mendel/${CI_PROJECT_NAME}-mendel-eagle-latest.deb"
-  rules:
-    - if: $CI_COMMIT_BRANCH == "master"
-    - if: $CI_COMMIT_TAG
-  cache:
-    key: "${CI_JOB_NAME}-${CI_COMMIT_REF_SLUG}"
-    paths:
-      - .ccache
-    policy: pull-push
-
 build_ubuntu_1604:
   variables:
-    CC: gcc-7
-    CXX: g++-7
+    CC: gcc-8
+    CXX: g++-8
   <<: *ubuntu_curr_builder
   image: inivation/ubuntu:16.04
   script:
@@ -181,14 +119,18 @@ build_ubuntu_1604:
     - make -j1 -s
 
 build_ubuntu_1804:
+  variables:
+    CC: gcc-8
+    CXX: g++-8
   <<: *ubuntu_curr_builder
   image: inivation/ubuntu:18.04
 
-build_ubuntu_curr_gcc7:
+build_ubuntu_2004:
   variables:
-    CC: gcc-7
-    CXX: g++-7
+    CC: gcc-10
+    CXX: g++-10
   <<: *ubuntu_curr_builder
+  image: inivation/ubuntu:20.04
 
 build_ubuntu_curr_gcc8:
   variables:
@@ -208,12 +150,6 @@ build_ubuntu_curr_gcc10:
     CXX: g++-10
   <<: *ubuntu_curr_builder
 
-build_ubuntu_curr_clang7:
-  variables:
-    CC: clang-7
-    CXX: clang++-7
-  <<: *ubuntu_curr_builder
-
 build_ubuntu_curr_clang8:
   variables:
     CC: clang-8
@@ -230,6 +166,12 @@ build_ubuntu_curr_clang10:
   variables:
     CC: clang-10
     CXX: clang++-10
+  <<: *ubuntu_curr_builder
+
+build_ubuntu_curr_clang11:
+  variables:
+    CC: clang-11
+    CXX: clang++-11
   <<: *ubuntu_curr_builder
 
 pages:
@@ -258,6 +200,8 @@ release_ubuntu:
     - ./packageUbuntu.sh --pkg-name ${CI_PROJECT_NAME} --pkg-version "${CI_COMMIT_TAG}" --distro bionic --gpg-key-id "${PPA_GPG_KEY_ID}" --gpg-key-pass "${PPA_GPG_KEY_PASS}" --upload
     - sleep 60 # rate-limit connections to PPA upload server
     - ./packageUbuntu.sh --pkg-name ${CI_PROJECT_NAME} --pkg-version "${CI_COMMIT_TAG}" --distro focal --gpg-key-id "${PPA_GPG_KEY_ID}" --gpg-key-pass "${PPA_GPG_KEY_PASS}" --upload
+    - sleep 60 # rate-limit connections to PPA upload server
+    - ./packageUbuntu.sh --pkg-name ${CI_PROJECT_NAME} --pkg-version "${CI_COMMIT_TAG}" --distro groovy --gpg-key-id "${PPA_GPG_KEY_ID}" --gpg-key-pass "${PPA_GPG_KEY_PASS}" --upload
   rules:
     - if: $CI_COMMIT_TAG
 

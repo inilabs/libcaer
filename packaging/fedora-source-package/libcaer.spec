@@ -1,3 +1,5 @@
+%global __cmake_in_source_build 1
+
 Summary: Minimal C library to interact with neuromorphic sensors and processors
 Name:    libcaer
 Version: VERSION_REPLACE
@@ -8,7 +10,7 @@ Vendor:  iniVation AG
 
 Source0: https://gitlab.com/inivation/dv/%{name}/-/archive/%{version}/%{name}-%{version}.tar.gz
 
-BuildRequires: gcc >= 7.0, gcc-c++ >= 7.0, cmake >= 3.10, pkgconfig >= 0.29.0, libusbx-devel >= 1.0.17, libserialport-devel >= 0.1.1, opencv-devel >= 3.2.0
+BuildRequires: gcc >= 8.0, gcc-c++ >= 8.0, cmake >= 3.10, pkgconfig >= 0.29.0, libusbx-devel >= 1.0.17, libserialport-devel >= 0.1.1, opencv-devel >= 3.2.0
 Requires: libusbx >= 1.0.17, libserialport >= 0.1.1, opencv >= 3.2.0
 
 %description
@@ -27,11 +29,11 @@ Development files for libcaer, such as headers, pkg-config files, etc..
 %autosetup
 
 %build
-%cmake -DENABLE_STATIC=1 -DENABLE_OPENCV=1 -DENABLE_SERIALDEV=1 -DUDEV_INSTALL=1 .
-make %{?_smp_mflags}
+%cmake -DENABLE_STATIC=1 -DENABLE_OPENCV=1 -DENABLE_SERIALDEV=1 -DUDEV_INSTALL=1
+%cmake_build
 
 %install
-make install DESTDIR=%{buildroot}
+%cmake_install
 
 %files
 /lib/udev/rules.d/
